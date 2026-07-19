@@ -1,0 +1,917 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>RESO — 支出解像</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+JP:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{
+    --paper:#EFF2F5; --surface:#FFFFFF; --surface2:#F7F9FB;
+    --ink:#17212B; --ink2:#56646F; --ink3:#8A97A1;
+    --line:#Dce3e9; --line2:#C7D0D8;
+    --amber:#A8690A; --amber-bg:#F5EAD6; --amber-line:#E4C892;
+    --crimson:#A3374A; --crimson-bg:#F1DFE2;
+    --ok:#0E7C6B;
+    --mono:"IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+    --sans:"IBM Plex Sans JP", system-ui, -apple-system, "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+    --maxw:480px;
+    --nav-h:64px;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  html,body{height:100%;}
+  body{
+    font-family:var(--sans); background:#DEE3E8; color:var(--ink);
+    -webkit-font-smoothing:antialiased; line-height:1.45;
+  }
+  .num{font-family:var(--mono); font-variant-numeric:tabular-nums; letter-spacing:-.01em;}
+  button{font-family:inherit; cursor:pointer;}
+  input{font-family:inherit;}
+
+  /* ---- app shell ---- */
+  /* ---- auth ---- */
+  #auth{position:fixed; inset:0; z-index:100; background:#DEE3E8; display:flex; align-items:center; justify-content:center; padding:20px;}
+  #auth.hidden{display:none;}
+  .authcard{width:100%; max-width:360px; background:var(--surface); border:1px solid var(--line); border-radius:20px;
+    padding:28px 24px; box-shadow:0 24px 60px rgba(23,33,43,.14);}
+  .authbrand{display:flex; flex-direction:column; align-items:center; gap:3px; margin-bottom:6px;}
+  .authsub{text-align:center; font-size:12.5px; color:var(--ink3); margin:8px 0 22px;}
+  #auth .fl{display:block; font-size:12px; color:var(--ink2); margin:0 0 5px 2px;}
+  #auth .tin{margin-top:0;}
+  .autherr{color:var(--crimson); font-size:12px; min-height:16px; margin:8px 2px 0;}
+  .authbtn{width:100%; height:48px; margin-top:14px; border:0; border-radius:12px; background:var(--amber); color:#fff;
+    font-size:15px; font-weight:600; box-shadow:0 6px 16px rgba(168,105,10,.26);}
+  .authbtn:disabled{background:var(--line2); box-shadow:none;}
+  .authbtn:not(:disabled):active{transform:translateY(1px);}
+  .authswap{width:100%; height:40px; margin-top:8px; border:0; background:none; color:var(--ink2); font-size:12.5px;}
+  .authswap:hover{color:var(--amber);}
+
+  /* sync badge */
+  .sync{display:inline-flex; align-items:center; gap:6px; font-size:11px; color:var(--ink3); font-family:var(--mono);}
+  .sync .dot{width:7px; height:7px; border-radius:50%; background:var(--line2);}
+  .sync.s-ok .dot{background:var(--ok);} .sync.s-ok{color:var(--ok);}
+  .sync.s-save .dot{background:var(--amber);} .sync.s-save{color:var(--amber);}
+  .sync.s-err .dot{background:var(--crimson);} .sync.s-err{color:var(--crimson);}
+
+  .app{max-width:var(--maxw); margin:0 auto; min-height:100dvh; background:var(--paper);
+    box-shadow:0 0 0 1px var(--line), 0 24px 60px rgba(23,33,43,.10); position:relative;
+    display:flex; flex-direction:column;}
+  .head{padding:18px 18px 14px; display:flex; align-items:flex-end; justify-content:space-between; gap:12px;}
+  .brand{display:flex; flex-direction:column; gap:2px;}
+  .wordmark{font-family:var(--mono); font-weight:600; font-size:20px; letter-spacing:.12em; color:var(--ink);}
+  .wordmark b{color:var(--amber); font-weight:600;}
+  .subttl{font-size:11px; color:var(--ink3); letter-spacing:.14em;}
+  .periodwrap{display:flex; flex-direction:column; align-items:flex-end; gap:5px;}
+  .period{display:flex; align-items:center; gap:2px; background:var(--surface); border:1px solid var(--line);
+    border-radius:10px; padding:4px 4px; box-shadow:0 1px 0 rgba(23,33,43,.03);}
+  .period button{background:none; border:0; width:28px; height:28px; border-radius:7px; color:var(--ink2);
+    display:grid; place-items:center;}
+  .period button:hover{background:var(--surface2); color:var(--ink);}
+  .period .pv{font-family:var(--mono); font-size:12.5px; padding:0 8px; width:auto; min-width:78px; height:28px;
+    display:grid; place-items:center; text-align:center; color:var(--ink);}
+  .period .pv.past{color:var(--amber);}
+  .backtoday{background:var(--amber-bg); border:1px solid var(--amber-line); color:var(--amber);
+    font-size:11px; font-family:var(--mono); letter-spacing:.02em; padding:3px 10px; border-radius:999px;
+    display:inline-flex; align-items:center; gap:5px;}
+  .backtoday::before{content:"↩"; font-family:var(--sans);}
+  .backtoday:hover{background:var(--amber); color:#fff; border-color:var(--amber);}
+  .backtoday[hidden]{display:none;}
+
+  .main{flex:1 1 auto; overflow-y:auto; overflow-x:hidden; padding:0 16px calc(var(--nav-h) + 24px);}
+  .view{display:none;}
+  .view.on{display:block; animation:fade .28s ease;}
+  @keyframes fade{from{opacity:0; transform:translateY(4px);} to{opacity:1; transform:none;}}
+
+  /* ---- 解像 (drill-down) ---- */
+  .readout{background:var(--surface); border:1px solid var(--line); border-radius:16px; padding:16px 16px 14px;
+    box-shadow:0 1px 0 rgba(23,33,43,.03);}
+  .rail{display:flex; flex-wrap:wrap; align-items:center; gap:2px; margin-bottom:12px;}
+  .rail button{background:none; border:0; padding:3px 7px; border-radius:7px; font-size:12.5px; color:var(--ink2);
+    display:inline-flex; align-items:center; gap:6px;}
+  .rail button:hover{background:var(--surface2);}
+  .rail .cur{color:var(--amber); background:var(--amber-bg); font-weight:600;}
+  .rail .sep{color:var(--ink3); font-size:11px; padding:0 1px; user-select:none;}
+  .rlabel{font-size:12px; color:var(--ink3); letter-spacing:.06em; margin-bottom:2px;}
+  .rtotal{display:flex; align-items:baseline; gap:8px;}
+  .rtotal .yen{font-family:var(--mono); font-size:13px; color:var(--ink2); align-self:flex-start; margin-top:6px;}
+  .rtotal .amt{font-family:var(--mono); font-weight:600; font-size:34px; line-height:1; color:var(--ink);}
+  .rtotal .shr{margin-left:auto; font-family:var(--mono); font-size:12px; color:var(--ink2);
+    background:var(--surface2); border:1px solid var(--line); border-radius:999px; padding:3px 9px; align-self:center;}
+
+  .fieldhead{display:flex; justify-content:space-between; align-items:baseline; margin:20px 4px 8px;}
+  .fieldhead .t{font-size:12px; color:var(--ink3); letter-spacing:.1em;}
+  .fieldhead .c{font-family:var(--mono); font-size:11px; color:var(--ink3);}
+
+  .seg{width:100%; background:var(--surface); border:1px solid var(--line); border-radius:12px;
+    padding:12px 13px; margin-bottom:8px; text-align:left; display:block; position:relative; overflow:hidden;
+    box-shadow:0 1px 0 rgba(23,33,43,.02); transition:border-color .15s, transform .06s;}
+  .seg:hover{border-color:var(--line2);}
+  .seg:active{transform:scale(.995);}
+  .seg .r1{display:flex; align-items:center; gap:10px; position:relative; z-index:1;}
+  .seg .nm{font-size:14.5px; font-weight:500; color:var(--ink); flex:1 1 auto; min-width:0;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .seg .pct{font-family:var(--mono); font-size:11.5px; color:var(--ink2); min-width:42px; text-align:right;}
+  .seg .val{font-family:var(--mono); font-weight:500; font-size:14px; color:var(--ink); min-width:78px; text-align:right;}
+  .seg .drill{color:var(--ink3); flex:0 0 auto; display:grid; place-items:center;}
+  .seg .bar{position:relative; z-index:1; height:5px; border-radius:3px; background:var(--surface2); margin-top:9px; overflow:hidden;}
+  .seg .bar>i{position:absolute; inset:0 auto 0 0; width:0; background:var(--amber); border-radius:3px;
+    transition:width .55s cubic-bezier(.22,.61,.36,1);}
+  .seg.big .bar>i{background:var(--crimson);}
+
+  /* monthly chart */
+  .mchart{background:var(--surface); border:1px solid var(--line); border-radius:16px; padding:14px 14px 10px; margin-top:10px;
+    box-shadow:0 1px 0 rgba(23,33,43,.03);}
+  .mhead{display:flex; justify-content:space-between; align-items:baseline; margin-bottom:12px;}
+  .mhead .t{font-size:12px; color:var(--ink3); letter-spacing:.06em;}
+  .mhead .t b{color:var(--ink2); font-weight:600;}
+  .mhead .t .myear{color:var(--ink); font-weight:600; font-size:13px;}
+  .mhead .t .ytot{color:var(--ink2); font-size:11.5px; margin-left:4px;}
+  .mhead .c{font-family:var(--mono); font-size:11px; color:var(--ink3);}
+  .mbars{display:flex; align-items:flex-end; gap:5px; height:96px;}
+  .mbar{flex:1 1 0; background:none; border:0; padding:0; display:flex; flex-direction:column; align-items:center; gap:6px;
+    height:100%; justify-content:flex-end;}
+  .mbar .mcol{width:100%; flex:1 1 auto; display:flex; align-items:flex-end; justify-content:center;}
+  .mbar .mcol>i{display:block; width:100%; max-width:22px; border-radius:4px 4px 2px 2px; background:var(--line2);
+    transition:height .5s cubic-bezier(.22,.61,.36,1), background .15s;}
+  .mbar .mlab{font-family:var(--mono); font-size:10px; color:var(--ink3);}
+  .mbar:hover .mcol>i{background:var(--ink3);}
+  .mbar.cur .mcol>i{background:var(--amber);}
+  .mbar.cur .mlab{color:var(--amber); font-weight:600;}
+  .mbar.peak .mcol>i{box-shadow:inset 0 0 0 1.5px var(--ink);}
+
+  /* leaf transactions */
+  .leafrow{background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:12px 13px;
+    margin-bottom:8px; display:flex; align-items:center; gap:12px;}
+  .leafrow .d{font-family:var(--mono); font-size:11px; color:var(--ink3); flex:0 0 auto;}
+  .leafrow .nm{font-size:14px; flex:1 1 auto; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .leafrow .val{font-family:var(--mono); font-weight:500; font-size:14px; text-align:right;}
+
+  .empty{text-align:center; color:var(--ink3); padding:48px 20px; font-size:13.5px;}
+  .empty .big{font-size:15px; color:var(--ink2); margin-bottom:6px;}
+
+  /* ---- 記録 (entry) ---- */
+  .amtcard{background:var(--surface); border:1px solid var(--line); border-radius:16px; padding:16px; margin-top:2px;}
+  .amtcard .top{display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;}
+  .amtcard .lab{font-size:12px; color:var(--ink3); letter-spacing:.08em;}
+  .amtdisp{display:flex; align-items:baseline; gap:8px; padding:6px 2px 2px;}
+  .amtdisp .yen{font-family:var(--mono); font-size:18px; color:var(--ink2);}
+  .amtdisp .v{font-family:var(--mono); font-weight:600; font-size:40px; line-height:1; color:var(--ink);}
+  .amtdisp.zero .v{color:var(--ink3);}
+  .taxnote{font-family:var(--mono); font-size:11.5px; color:var(--amber); min-height:16px; padding-left:2px;}
+
+  .toggle{display:inline-flex; border:1px solid var(--line2); border-radius:9px; overflow:hidden;}
+  .toggle button{background:var(--surface); border:0; padding:6px 12px; font-size:12px; color:var(--ink2); font-family:var(--mono);}
+  .toggle button.on{background:var(--ink); color:#fff;}
+
+  .keypad{display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:12px;}
+  .keypad button{background:var(--surface); border:1px solid var(--line); border-radius:12px; height:52px;
+    font-family:var(--mono); font-size:20px; color:var(--ink); box-shadow:0 1px 0 rgba(23,33,43,.03);}
+  .keypad button:hover{border-color:var(--line2);}
+  .keypad button:active{background:var(--surface2);}
+  .keypad button.wide{grid-column:span 1;}
+  .keypad button.del{color:var(--crimson); font-size:18px;}
+
+  .seclab{font-size:12px; color:var(--ink3); letter-spacing:.1em; margin:20px 4px 8px;}
+
+  /* item rows (多品目) */
+  .itemrow{background:var(--surface); border:1px solid var(--line); border-radius:13px; padding:11px 12px; margin-bottom:8px;
+    box-shadow:0 1px 0 rgba(23,33,43,.02);}
+  .ir-top{display:flex; align-items:center; gap:8px;}
+  .ir-name{margin-top:0; flex:1 1 auto; height:42px;}
+  .ir-del{flex:0 0 auto; width:34px; height:34px; border:1px solid var(--line); border-radius:9px; background:var(--surface);
+    color:var(--ink3); font-size:13px;}
+  .ir-del:hover{border-color:var(--crimson); color:var(--crimson);}
+  .ir-bot{display:flex; align-items:center; gap:8px; margin-top:9px;}
+  .ir-price{flex:1 1 auto; display:flex; align-items:center; border:1px solid var(--line2); border-radius:10px;
+    background:var(--surface); padding-left:10px; height:42px; min-width:0;}
+  .ir-price .pfx{font-family:var(--mono); color:var(--ink2); font-size:14px;}
+  .ir-in{border:0; background:none; height:40px; width:100%; padding:0 8px; font-size:15px; text-align:right; color:var(--ink); min-width:0;}
+  .ir-in:focus{outline:none;}
+  .ir-price:focus-within{border-color:var(--amber-line); box-shadow:0 0 0 3px var(--amber-bg);}
+  .ir-x, .ir-eq{color:var(--ink3); font-family:var(--mono); font-size:13px; flex:0 0 auto;}
+  .ir-qty{display:flex; align-items:center; border:1px solid var(--line2); border-radius:10px; overflow:hidden; flex:0 0 auto;}
+  .ir-qty .qbtn{width:32px; height:42px; border:0; background:var(--surface); color:var(--ink2); font-size:18px;}
+  .ir-qty .qbtn:hover{background:var(--surface2);}
+  .ir-qin{width:38px; height:42px; border:0; border-left:1px solid var(--line); border-right:1px solid var(--line);
+    background:var(--surface); text-align:center; font-size:15px; color:var(--ink);}
+  .ir-qin:focus{outline:none; background:var(--amber-bg);}
+  .ir-sum{flex:0 0 auto; min-width:72px; text-align:right; font-family:var(--mono); font-weight:500; font-size:14px; color:var(--ink);}
+  .additem{width:100%; height:44px; border:1px dashed var(--line2); border-radius:11px; background:var(--surface);
+    color:var(--ink2); font-size:13px; margin-top:2px;}
+  .additem:hover{border-color:var(--amber-line); color:var(--amber);}
+
+  /* duplicate button in 履歴 */
+  .dupbtn{flex:0 0 auto; width:34px; height:34px; border:1px solid var(--line); border-radius:9px; background:var(--surface);
+    color:var(--ink3); display:grid; place-items:center; margin-left:2px;}
+  .dupbtn:hover{border-color:var(--amber-line); color:var(--amber); background:var(--amber-bg);}
+  .dupbtn:active{transform:scale(.94);}
+  .delbtn{flex:0 0 auto; width:34px; height:34px; border:1px solid var(--line); border-radius:9px; background:var(--surface);
+    color:var(--ink3); display:grid; place-items:center; margin-left:2px;}
+  .delbtn:hover{border-color:var(--crimson); color:var(--crimson); background:var(--crimson-bg);}
+  .delbtn:active{transform:scale(.94);}
+  .chips{display:flex; flex-wrap:wrap; gap:7px;}
+  .chip{background:var(--surface); border:1px solid var(--line); border-radius:999px; padding:7px 13px;
+    font-size:13px; color:var(--ink2);}
+  .chip:hover{border-color:var(--line2);}
+  .chip.on{background:var(--amber-bg); border-color:var(--amber-line); color:var(--amber); font-weight:600;}
+
+  .tin{width:100%; height:44px; padding:0 13px; border:1px solid var(--line2); border-radius:11px;
+    background:var(--surface); color:var(--ink); font-size:14px; margin-top:8px;}
+  .tin:focus{outline:none; border-color:var(--amber-line); box-shadow:0 0 0 3px var(--amber-bg);}
+  .tin::placeholder{color:var(--ink3);}
+
+  .rec-btn{width:100%; height:52px; margin-top:22px; border:0; border-radius:13px; background:var(--amber); color:#fff;
+    font-size:15px; font-weight:600; letter-spacing:.02em; box-shadow:0 6px 16px rgba(168,105,10,.28);}
+  .rec-btn:disabled{background:var(--line2); color:var(--surface); box-shadow:none;}
+  .rec-btn:not(:disabled):active{transform:translateY(1px);}
+
+  /* ---- 履歴 ---- */
+  .daygroup{margin-top:16px;}
+  .dayhead{display:flex; justify-content:space-between; align-items:baseline; margin:0 4px 8px;}
+  .dayhead .dt{font-family:var(--mono); font-size:12px; color:var(--ink2);}
+  .dayhead .dsum{font-family:var(--mono); font-size:12px; color:var(--ink3);}
+  .hrow{background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:11px 13px;
+    margin-bottom:7px; display:flex; align-items:center; gap:11px;}
+  .hrow .tag{font-size:10.5px; color:var(--ink3); font-family:var(--mono); flex:0 0 auto;}
+  .hrow .body{flex:1 1 auto; min-width:0;}
+  .hrow .l1{font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .hrow .l2{font-size:11.5px; color:var(--ink3); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .hrow .val{font-family:var(--mono); font-weight:500; font-size:14px; text-align:right; flex:0 0 auto;}
+
+  /* ---- 設定 ---- */
+  .card{background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:14px; margin-top:12px;}
+  .card h3{font-size:13px; color:var(--ink2); font-weight:600; margin-bottom:4px;}
+  .card p.note{font-size:12px; color:var(--ink3); line-height:1.5;}
+  .treerow{display:flex; align-items:center; gap:10px; padding:9px 2px; border-bottom:1px solid var(--line);}
+  .treerow:last-child{border-bottom:0;}
+  .treerow .h{width:8px; height:8px; border-radius:2px; background:var(--amber); flex:0 0 auto;}
+  .treerow .nm{flex:1 1 auto; font-size:14px;}
+  .treerow .ct{font-family:var(--mono); font-size:11px; color:var(--ink3);}
+  .treerow .mv{color:var(--ink3); display:grid; place-items:center; width:26px; height:26px; border:1px solid var(--line);
+    border-radius:7px; background:var(--surface);}
+  .ghost-btn{width:100%; height:44px; border:1px dashed var(--line2); border-radius:11px; background:var(--surface);
+    color:var(--ink2); font-size:13px; margin-top:10px;}
+  .ghost-btn:hover{border-color:var(--amber-line); color:var(--amber);}
+  .stub{display:inline-block; font-family:var(--mono); font-size:10px; letter-spacing:.08em; color:var(--amber);
+    background:var(--amber-bg); border:1px solid var(--amber-line); border-radius:5px; padding:1px 6px; margin-left:8px;}
+
+  /* ---- bottom nav ---- */
+  .nav{position:sticky; bottom:0; left:0; right:0; height:var(--nav-h); z-index:20;
+    background:var(--surface2); border-top:1px solid var(--line);
+    display:flex; padding-bottom:env(safe-area-inset-bottom);}
+  .nav button{flex:1; background:none; border:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:4px; color:var(--ink3); font-size:10.5px; letter-spacing:.04em; padding-top:8px;}
+  .nav button svg{width:21px; height:21px; stroke:currentColor; fill:none; stroke-width:1.6;}
+  .nav button.on{color:var(--amber);}
+  .nav button.on .lbl{font-weight:600;}
+
+  /* toast */
+  .toast{position:fixed; left:50%; bottom:calc(var(--nav-h) + 18px); transform:translate(-50%,20px);
+    background:var(--ink); color:#fff; font-size:13px; padding:10px 18px; border-radius:11px; opacity:0;
+    pointer-events:none; transition:opacity .25s, transform .25s; z-index:50; box-shadow:0 10px 30px rgba(23,33,43,.3);}
+  .toast.on{opacity:1; transform:translate(-50%,0);}
+
+  @media (prefers-reduced-motion: reduce){
+    *{animation:none !important; transition:none !important;}
+  }
+</style>
+</head>
+<body>
+<div id="auth">
+  <div class="authcard">
+    <div class="authbrand"><span class="wordmark">RE<b>S</b>O</span><span class="subttl">支 出 解 像</span></div>
+    <p class="authsub" id="authSub">サインインしてデータを同期します。</p>
+    <label class="fl">メールアドレス</label>
+    <input class="tin" id="authEmail" type="email" autocomplete="username" inputmode="email" placeholder="you@example.com">
+    <label class="fl" style="margin-top:12px;">パスワード</label>
+    <input class="tin" id="authPw" type="password" autocomplete="current-password" placeholder="••••••••">
+    <div class="autherr" id="authErr"></div>
+    <button class="authbtn" id="authBtn">サインイン</button>
+    <button class="authswap" id="authSwap">アカウントを作成する</button>
+  </div>
+</div>
+<div class="app">
+  <header class="head">
+    <div class="brand">
+      <div class="wordmark">RE<b>S</b>O</div>
+      <div class="subttl">支 出 解 像</div>
+      <div class="sync" id="sync"><span class="dot"></span><span id="synct"></span></div>
+    </div>
+    <div class="periodwrap">
+      <div class="period">
+        <button id="pprev" aria-label="前の月">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+        </button>
+        <button class="pv num" id="pv" aria-label="今月へ戻る">2026 / 07</button>
+        <button id="pnext" aria-label="次の月">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+        </button>
+      </div>
+      <button class="backtoday" id="backtoday" hidden>今月へ戻る</button>
+    </div>
+  </header>
+
+  <div class="main" id="main">
+    <!-- 解像 -->
+    <section class="view on" id="v-lens"></section>
+    <!-- 記録 -->
+    <section class="view" id="v-rec"></section>
+    <!-- 履歴 -->
+    <section class="view" id="v-hist"></section>
+    <!-- 設定 -->
+    <section class="view" id="v-set"></section>
+  </div>
+
+  <nav class="nav" id="nav">
+    <button data-tab="lens" class="on">
+      <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/><circle cx="11" cy="11" r="2.4"/></svg>
+      <span class="lbl">解像</span>
+    </button>
+    <button data-tab="rec">
+      <svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M12 9v6M9 12h6"/></svg>
+      <span class="lbl">記録</span>
+    </button>
+    <button data-tab="hist">
+      <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+      <span class="lbl">履歴</span>
+    </button>
+    <button data-tab="set">
+      <svg viewBox="0 0 24 24"><path d="M5 8h14M5 16h14"/><circle cx="9" cy="8" r="2.2"/><circle cx="15" cy="16" r="2.2"/></svg>
+      <span class="lbl">設定</span>
+    </button>
+  </nav>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============================================================
+   RESO — スケルトン（骨組み）
+   ※ まだ Supabase 未接続。データはメモリ上のみ（再読込で初期化）。
+   ※ 目的：全体構造・デザイン・シグネチャ操作（解像ドリルダウン）の確認。
+   ============================================================ */
+
+/* ---- mock data: フラットな取引（これがそのまま将来のデータモデル） ---- */
+/* level: cat（費目）> sub（区分）> shop（店）> item（品目） */
+const LEVELS = ['cat','sub','shop','item'];
+const LEVEL_LABEL = {cat:'費目', sub:'区分', shop:'店', item:'品目'};
+
+let TX = [];   // クラウド(kakeibo_tx)から読み込む
+
+function tx(date, amount, cat, sub, shop, item, taxRate){
+  return {id:'t'+Math.random().toString(36).slice(2,9), date, amount, cat, sub, shop, item, taxRate:taxRate||null};
+}
+
+/* ---- category tree (設定の커스터마이징 대상・kakeibo_settingsから読み込む) ---- */
+const DEFAULT_CAT_TREE = {
+  '食費':['コンビニ','外食','スーパー','カフェ'],
+  '日用品':['ドラッグストア','100均','雑貨'],
+  '趣味':['オーディオ','映画・書籍','サブスク','ゲーム'],
+  '交通':['電車','バス','タクシー'],
+  'その他':[],
+};
+let CAT_TREE = JSON.parse(JSON.stringify(DEFAULT_CAT_TREE));
+
+/* ---- state ---- */
+let period = new Date().toISOString().slice(0,7);   // 実際の今月
+let path = [];            // 解像ドリルダウンの現在パス
+let TAB = 'lens';
+
+/* ---- helpers ---- */
+const yen = n => '¥' + Math.round(n).toLocaleString('ja-JP');
+function periodLabel(p){ return p.replace('-',' / '); }
+function inPeriod(){ return TX.filter(t => t.date.slice(0,7) === period); }
+function matchPath(t){ return path.every((v,i) => t[LEVELS[i]] === v); }
+
+/* 現在のドリルダウン path に一致する取引を、選択中の月が属する「年の1〜12月」で集計 */
+function yearlySeries(){
+  const year = parseInt(period.slice(0,4),10);
+  const months = [];
+  for(let m=1;m<=12;m++) months.push(year + '-' + String(m).padStart(2,'0'));
+  const sums = {};
+  TX.forEach(t=>{
+    if(!path.every((v,i)=> t[LEVELS[i]] === v)) return;   // path 배율 반영
+    const mk = t.date.slice(0,7);
+    if(months.includes(mk)) sums[mk] = (sums[mk]||0) + t.amount;
+  });
+  return {year, series: months.map(mk=>({mk, v:sums[mk]||0}))};
+}
+
+function aggregate(){
+  const rows = inPeriod().filter(matchPath);
+  const total = rows.reduce((s,t)=>s+t.amount,0);
+  const key = LEVELS[path.length];               // 次の階層のキー
+  if(!key){ // 末端：個別取引
+    return {total, leaf:true, rows:rows.slice().sort((a,b)=>b.date.localeCompare(a.date))};
+  }
+  const map = {};
+  rows.forEach(t=>{ const k=t[key]||'（未設定）'; map[k]=(map[k]||0)+t.amount; });
+  const children = Object.entries(map).map(([k,v])=>({k,v})).sort((a,b)=>b.v-a.v);
+  return {total, leaf:false, key, children};
+}
+
+/* ============================================================
+   render: 解像
+   ============================================================ */
+function renderLens(){
+  const el = document.getElementById('v-lens');
+  const monthEmpty = inPeriod().length === 0;
+  const periodTotal = inPeriod().reduce((s,t)=>s+t.amount,0);
+  const ag = aggregate();
+
+  // rail
+  let rail = '<button data-i="0" class="'+(path.length===0?'cur':'')+'">全体</button>';
+  path.forEach((v,i)=>{
+    rail += '<span class="sep">›</span>';
+    rail += '<button data-i="'+(i+1)+'" class="'+(i===path.length-1?'cur':'')+'">'+esc(v)+'</button>';
+  });
+
+  const label = path.length ? path.map(esc).join(' › ') : '全体';
+  const share = periodTotal ? Math.round(ag.total/periodTotal*100) : 0;
+
+  let html = '<div class="readout">'
+    + '<div class="rail">'+rail+'</div>'
+    + '<div class="rlabel">'+label+'</div>'
+    + '<div class="rtotal"><span class="yen">¥</span><span class="amt">'+Math.round(ag.total).toLocaleString('ja-JP')+'</span>'
+    + (path.length ? '<span class="shr">全体の '+share+'%</span>' : '<span class="shr">'+period.slice(5)+'月</span>')
+    + '</div></div>';
+
+  // 年グラフ（現在の배율を追従）— 空月でも常に表示（他の月への手がかりになる）
+  html += renderMonthly();
+
+  if(monthEmpty){
+    html += '<div class="empty"><div class="big">この月の記録はまだありません</div>'
+      + 'グラフの棒をタップして他の月を見るか、下の「記録」から支出を残しましょう。</div>';
+    el.innerHTML = html;
+    bindLensEvents(el);
+    return;
+  }
+
+  if(ag.leaf){
+    html += '<div class="fieldhead"><span class="t">取引</span><span class="c">'+ag.rows.length+' 件</span></div>';
+    ag.rows.forEach(t=>{
+      html += '<div class="leafrow"><span class="d">'+t.date.slice(5).replace('-','/')+'</span>'
+        + '<span class="nm">'+esc(t.item)+'</span>'
+        + '<span class="val">'+yen(t.amount)+'</span></div>';
+    });
+  } else {
+    const maxv = ag.children[0] ? ag.children[0].v : 1;
+    html += '<div class="fieldhead"><span class="t">'+LEVEL_LABEL[ag.key].toUpperCase()+' 別</span>'
+      + '<span class="c">タップで拡大 ⊕</span></div>';
+    ag.children.forEach((c,idx)=>{
+      const pct = ag.total ? Math.round(c.v/ag.total*100) : 0;
+      const w = maxv ? Math.max(4, Math.round(c.v/maxv*100)) : 0;
+      const big = c.v/ (ag.total||1) >= 0.5;
+      html += '<button class="seg'+(big?' big':'')+'" data-k="'+esc(c.k)+'">'
+        + '<div class="r1"><span class="nm">'+esc(c.k)+'</span>'
+        + '<span class="pct">'+pct+'%</span>'
+        + '<span class="val">'+yen(c.v)+'</span>'
+        + '<span class="drill"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span></div>'
+        + '<div class="bar"><i data-w="'+w+'"></i></div>'
+        + '</button>';
+    });
+  }
+
+  el.innerHTML = html;
+  bindLensEvents(el);
+}
+
+function bindLensEvents(el){
+  el.querySelectorAll('.rail button').forEach(b=>{
+    b.onclick = ()=>{ path = path.slice(0, parseInt(b.dataset.i)); renderLens(); };
+  });
+  el.querySelectorAll('.seg').forEach(b=>{
+    b.onclick = ()=>{ path = path.concat([b.dataset.k]); renderLens(); };
+  });
+  el.querySelectorAll('.mbar').forEach(b=>{
+    b.onclick = ()=>{ if(b.dataset.mk!==period){ period=b.dataset.mk;
+      updatePeriodUI(); renderLens(); } };
+  });
+
+  // animate bars (zoom feel)
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  requestAnimationFrame(()=>{
+    el.querySelectorAll('.bar>i').forEach(i=>{
+      if(reduce){ i.style.width = i.dataset.w + '%'; }
+      else { i.style.width = '0%'; requestAnimationFrame(()=>{ i.style.width = i.dataset.w + '%'; }); }
+    });
+    if(!reduce){
+      el.querySelectorAll('.mbar .mcol>i').forEach(i=>{ const h=i.style.height; i.style.height='0%';
+        requestAnimationFrame(()=>{ i.style.height=h; }); });
+    }
+  });
+}
+
+function renderMonthly(){
+  const {year, series} = yearlySeries();
+  const max = Math.max(1, ...series.map(s=>s.v));
+  const peak = series.reduce((a,b)=> b.v>a.v?b:a, series[0]);
+  const yearTotal = series.reduce((s,x)=>s+x.v,0);
+  const scope = path.length ? path[path.length-1] : '全体';
+
+  let bars = '';
+  series.forEach(s=>{
+    const h = s.v ? Math.max(3, Math.round(s.v/max*100)) : 0;
+    const isCur = s.mk===period;
+    const isPeak = s.v>0 && s.mk===peak.mk;
+    const cls = 'mbar' + (isCur?' cur':'') + (isPeak?' peak':'');
+    bars += '<button class="'+cls+'" data-mk="'+s.mk+'" title="'+s.mk+'　'+yen(s.v)+'">'
+      + '<span class="mcol"><i style="height:'+h+'%"></i></span>'
+      + '<span class="mlab">'+parseInt(s.mk.slice(5),10)+'</span>'
+      + '</button>';
+  });
+
+  const peakTxt = yearTotal>0 ? '最多 '+parseInt(peak.mk.slice(5),10)+'月 · '+yen(peak.v) : '記録なし';
+  return '<div class="mchart">'
+    + '<div class="mhead"><span class="t"><span class="myear num">'+year+'</span> 年 · <b>'+esc(scope)+'</b> <span class="ytot num">'+yen(yearTotal)+'</span></span>'
+    + '<span class="c">'+peakTxt+'</span></div>'
+    + '<div class="mbars">'+bars+'</div></div>';
+}
+
+function emptyMonth(){
+  return '<div class="empty"><div class="big">この月の記録はまだありません</div>'
+    + '下の「記録」から、最初の支出を残しましょう。</div>';
+}
+
+/* ============================================================
+   render: 記録（入力）— 多品目（単価 × 数量）対応
+   ============================================================ */
+// REC.items: [{name, price:'', qty:1}]  価格は税抜/税込を taxMode で解釈
+function newItem(){ return {name:'', price:'', qty:1}; }
+let REC = {taxMode:'in', cat:'', sub:'', shop:'', items:[newItem()]};
+
+function lineTotal(it){ const p=parseInt(it.price||'0',10)||0; const q=Math.max(1,parseInt(it.qty||'1',10)||1); return p*q; }
+function recSubtotal(){ return REC.items.reduce((s,it)=>s+lineTotal(it),0); }
+function recTotalIncl(){ const sub=recSubtotal(); return REC.taxMode==='out'?Math.round(sub*1.1):sub; }
+
+function renderRec(){
+  const el = document.getElementById('v-rec');
+  const cats = Object.keys(CAT_TREE);
+  const subs = REC.cat ? (CAT_TREE[REC.cat]||[]) : [];
+  const sub = recSubtotal();
+  const incl = recTotalIncl();
+
+  // 上部：合計リードアウト + 税トグル
+  let html = '<div class="amtcard">'
+    + '<div class="top"><span class="lab">合計</span>'
+    + '<div class="toggle">'
+    + '<button data-tax="in" class="'+(REC.taxMode==='in'?'on':'')+'">税込</button>'
+    + '<button data-tax="out" class="'+(REC.taxMode==='out'?'on':'')+'">税抜</button>'
+    + '</div></div>'
+    + '<div class="amtdisp'+(incl===0?' zero':'')+'"><span class="yen">¥</span><span class="v">'+incl.toLocaleString('ja-JP')+'</span></div>'
+    + '<div class="taxnote">'+(REC.taxMode==='out'&&sub>0 ? '税抜 '+yen(sub)+' → 税込 '+yen(incl)+'（10%）'
+        : (REC.items.length>1 ? REC.items.length+' 品目' : '')) +'</div>'
+    + '</div>';
+
+  // 費目
+  html += '<div class="seclab">費目</div><div class="chips">'
+    + cats.map(c=>'<button class="chip'+(REC.cat===c?' on':'')+'" data-cat="'+esc(c)+'">'+esc(c)+'</button>').join('')
+    + '</div>';
+  if(subs.length){
+    html += '<div class="seclab">区分</div><div class="chips">'
+      + subs.map(s=>'<button class="chip'+(REC.sub===s?' on':'')+'" data-sub="'+esc(s)+'">'+esc(s)+'</button>').join('')
+      + '</div>';
+  }
+
+  // 店（共有）
+  html += '<div class="seclab">店 <span class="stub">自由入力・後で自動補完</span></div>'
+    + '<input class="tin" id="shopin" placeholder="例：マツモトキヨシ" value="'+esc(REC.shop)+'">';
+
+  // 品目（複数行：単価 × 数量）
+  html += '<div class="seclab">品目 <span class="stub">単価 × 数量・後で自動補完</span></div>';
+  REC.items.forEach((it,idx)=>{
+    const lt = lineTotal(it);
+    html += '<div class="itemrow" data-idx="'+idx+'">'
+      + '<div class="ir-top">'
+      +   '<input class="tin ir-name" data-idx="'+idx+'" placeholder="品目（例：おしりふき）" value="'+esc(it.name)+'">'
+      +   (REC.items.length>1 ? '<button class="ir-del" data-idx="'+idx+'" aria-label="この品目を削除">✕</button>' : '')
+      + '</div>'
+      + '<div class="ir-bot">'
+      +   '<div class="ir-price"><span class="pfx">¥</span><input class="ir-in num" data-idx="'+idx+'" data-f="price" inputmode="numeric" placeholder="単価" value="'+esc(it.price)+'"></div>'
+      +   '<span class="ir-x">×</span>'
+      +   '<div class="ir-qty"><button class="qbtn" data-idx="'+idx+'" data-q="-">−</button>'
+      +      '<input class="ir-qin num" data-idx="'+idx+'" data-f="qty" inputmode="numeric" value="'+esc(String(it.qty))+'">'
+      +      '<button class="qbtn" data-idx="'+idx+'" data-q="+">＋</button></div>'
+      +   '<span class="ir-eq">=</span>'
+      +   '<span class="ir-sum num">'+(lt?yen(lt):'—')+'</span>'
+      + '</div>'
+      + '</div>';
+  });
+  html += '<button class="additem" id="additem">＋ 品目を追加</button>';
+
+  const ok = sub>0 && REC.cat;
+  html += '<button class="rec-btn" id="recbtn" '+(ok?'':'disabled')+'>'
+    + (REC.editFrom?'複製して記録する':'記録する') + '</button>';
+
+  el.innerHTML = html;
+
+  // events
+  el.querySelectorAll('.toggle button').forEach(b=> b.onclick = ()=>{ REC.taxMode=b.dataset.tax; renderRec(); });
+  el.querySelectorAll('[data-cat]').forEach(b=> b.onclick = ()=>{ REC.cat=b.dataset.cat; REC.sub=''; renderRec(); });
+  el.querySelectorAll('[data-sub]').forEach(b=> b.onclick = ()=>{ REC.sub=b.dataset.sub; renderRec(); });
+  const shopin=document.getElementById('shopin'); if(shopin) shopin.oninput=e=>REC.shop=e.target.value;
+
+  // 品目行：名前・単価はライブ更新だが再描画しない（フォーカス維持）。合計だけ更新
+  el.querySelectorAll('.ir-name').forEach(inp=> inp.oninput=e=>{ REC.items[+e.target.dataset.idx].name=e.target.value; });
+  el.querySelectorAll('.ir-in, .ir-qin').forEach(inp=> inp.oninput=e=>{
+    const i=+e.target.dataset.idx, f=e.target.dataset.f;
+    REC.items[i][f]=e.target.value.replace(/[^0-9]/g,'');
+    updateRecTotals();
+  });
+  el.querySelectorAll('.qbtn').forEach(b=> b.onclick=()=>{
+    const i=+b.dataset.idx; let q=Math.max(1,parseInt(REC.items[i].qty||'1',10)||1);
+    q += (b.dataset.q==='+'?1:-1); if(q<1)q=1; REC.items[i].qty=q; renderRec();
+  });
+  el.querySelectorAll('.ir-del').forEach(b=> b.onclick=()=>{ REC.items.splice(+b.dataset.idx,1); renderRec(); });
+  const add=document.getElementById('additem'); if(add) add.onclick=()=>{ REC.items.push(newItem()); renderRec(); };
+  const rb=document.getElementById('recbtn'); if(rb) rb.onclick=saveRec;
+}
+
+// 再描画せず合計表示だけ更新（入力中フォーカスを保つ）
+function updateRecTotals(){
+  const sub=recSubtotal(), incl=recTotalIncl();
+  const disp=document.querySelector('#v-rec .amtdisp'); const v=document.querySelector('#v-rec .amtdisp .v');
+  if(v){ v.textContent=incl.toLocaleString('ja-JP'); disp.classList.toggle('zero', incl===0); }
+  const note=document.querySelector('#v-rec .taxnote');
+  if(note) note.textContent = REC.taxMode==='out'&&sub>0 ? '税抜 '+yen(sub)+' → 税込 '+yen(incl)+'（10%）'
+        : (REC.items.length>1 ? REC.items.length+' 品目' : '');
+  document.querySelectorAll('#v-rec .itemrow').forEach(row=>{
+    const i=+row.dataset.idx; const lt=lineTotal(REC.items[i]);
+    const s=row.querySelector('.ir-sum'); if(s) s.textContent = lt?yen(lt):'—';
+  });
+  const rb=document.getElementById('recbtn'); if(rb) rb.disabled = !(sub>0 && REC.cat);
+}
+
+function saveRec(){
+  const sub=recSubtotal();
+  if(!(sub>0 && REC.cat)) return;
+  const d = new Date().toISOString().slice(0,10);   // 実際の今日
+  const rate = REC.taxMode==='out'?0.10:null;
+  const rows = [];
+  REC.items.forEach(it=>{
+    const lt=lineTotal(it); if(lt<=0) return;
+    const amount = REC.taxMode==='out'?Math.round(lt*1.1):lt;   // 税抜入力なら税込へ
+    rows.push({date:d, amount, cat:REC.cat, sub:REC.sub||'（未設定）',
+      shop:REC.shop||'（未設定）', item:it.name||'（品目なし）', taxRate:rate});
+  });
+  if(!rows.length) return;
+  const total=recTotalIncl(), n=rows.length;
+
+  // 記録した月へ移動して結果を見せる
+  period = d.slice(0,7);
+  REC = {taxMode:'in', cat:'', sub:'', shop:'', items:[newItem()]};
+
+  insertTx(rows).then(()=>{
+    showToast('記録しました　'+yen(total)+(n>1?'（'+n+'品目）':''));
+  });
+  updatePeriodUI(); path=[]; go('lens');
+}
+
+/* 履歴からの複製：内容をコピーして記録画面を開く（日付は今日／確定前に編集可能） */
+function duplicateTx(id){
+  const t = TX.find(x=>x.id===id); if(!t) return;
+  REC = {taxMode: t.taxRate?'out':'in', cat:t.cat, sub:t.sub==='（未設定）'?'':t.sub,
+    shop:t.shop==='（未設定）'?'':t.shop,
+    items:[{name:t.item==='（品目なし）'?'':t.item,
+      price:String(t.taxRate?Math.round(t.amount/1.1):t.amount), qty:1}],
+    editFrom:id};
+  go('rec');
+  showToast('複製しました。内容を確認して記録');
+}
+
+/* ============================================================
+   render: 履歴
+   ============================================================ */
+function renderHist(){
+  const el = document.getElementById('v-hist');
+  const rows = inPeriod().slice().sort((a,b)=>b.date.localeCompare(a.date));
+  if(!rows.length){ el.innerHTML = emptyMonth(); return; }
+  // group by date
+  const days = {};
+  rows.forEach(t=>{ (days[t.date] = days[t.date]||[]).push(t); });
+  let html = '';
+  Object.keys(days).sort((a,b)=>b.localeCompare(a)).forEach(d=>{
+    const list = days[d];
+    const sum = list.reduce((s,t)=>s+t.amount,0);
+    html += '<div class="daygroup"><div class="dayhead"><span class="dt">'+d.slice(5).replace('-','/')+'（'+wday(d)+'）</span>'
+      + '<span class="dsum">'+yen(sum)+'</span></div>';
+    list.forEach(t=>{
+      html += '<div class="hrow"><span class="tag">'+esc(t.cat.slice(0,2))+'</span>'
+        + '<div class="body"><div class="l1">'+esc(t.item)+'</div>'
+        + '<div class="l2">'+esc(t.cat)+' › '+esc(t.sub)+' › '+esc(t.shop)+'</div></div>'
+        + '<span class="val">'+yen(t.amount)+'</span>'
+        + '<button class="dupbtn" data-id="'+t.id+'" aria-label="この記録を複製">'
+        + '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="9" y="9" width="11" height="11" rx="2.5"/><path d="M5 15V6a2 2 0 0 1 2-2h8"/></svg></button>'
+        + '<button class="delbtn" data-id="'+t.id+'" aria-label="この記録を削除">'
+        + '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 7h14M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button>'
+        + '</div>';
+    });
+    html += '</div>';
+  });
+  el.innerHTML = html;
+  el.querySelectorAll('.dupbtn').forEach(b=> b.onclick=()=>duplicateTx(b.dataset.id));
+  el.querySelectorAll('.delbtn').forEach(b=> b.onclick=()=>{
+    if(confirm('この記録を削除しますか？')) deleteTx(b.dataset.id).then(()=>renderHist());
+  });
+}
+function wday(d){ return ['日','月','火','水','木','金','土'][new Date(d+'T00:00:00').getDay()]; }
+
+/* ============================================================
+   render: 設定
+   ============================================================ */
+function renderSet(){
+  const el = document.getElementById('v-set');
+  const counts = {};
+  inPeriod().forEach(t=>{ counts[t.cat]=(counts[t.cat]||0)+1; });
+  let tree = '';
+  Object.keys(CAT_TREE).forEach(c=>{
+    tree += '<div class="treerow"><span class="h"></span><span class="nm">'+esc(c)+'</span>'
+      + '<span class="ct">'+(CAT_TREE[c].length)+' 区分</span>'
+      + '<button class="mv" aria-label="並べ替え"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 9l4-4 4 4M8 15l4 4 4-4"/></svg></button></div>';
+  });
+  el.innerHTML =
+    '<div class="card"><h3>費目の管理 <span class="stub">カスタマイズ</span></h3>'
+    + '<p class="note">費目（大きな区分）を自由に追加・削除・改名・並べ替え。店と品目は入力時に自由入力＋自動補完なので、ここでは管理しません。</p>'
+    + '<div style="margin-top:10px;">'+tree+'</div>'
+    + '<button class="ghost-btn">＋ 費目を追加</button></div>'
+
+    + '<div class="card"><h3>税率のきほん</h3>'
+    + '<p class="note">金額は<b>税込</b>がきほん。レシートの総額をそのまま入力します。税抜で入れたいときだけ、記録画面で「税抜」に切り替えると 10% を計算します。</p></div>'
+
+    + '<div class="card"><h3>アカウント</h3>'
+    + '<p class="note" style="margin-bottom:10px;">'+(SESSION?esc(SESSION.user.email):'未サインイン')
+    + '<br>変更は自動でクラウド（kakeibo_tx）に保存され、どの端末でも同じデータが見られます。</p>'
+    + '<button class="ghost-btn" id="signoutbtn">サインアウト</button></div>';
+
+  el.querySelectorAll('.ghost-btn')[0]?.addEventListener('click',()=>showToast('費目の編集は次のアップデートで'));
+  const so=document.getElementById('signoutbtn'); if(so) so.onclick=signOut;
+}
+
+/* ============================================================
+   nav / period / util
+   ============================================================ */
+function go(tab){
+  TAB = tab;
+  document.querySelectorAll('.view').forEach(v=>v.classList.remove('on'));
+  document.getElementById('v-'+tab).classList.add('on');
+  document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('on', b.dataset.tab===tab));
+  document.getElementById('main').scrollTop = 0;
+  if(tab==='lens') renderLens();
+  if(tab==='rec') renderRec();
+  if(tab==='hist') renderHist();
+  if(tab==='set') renderSet();
+}
+document.querySelectorAll('#nav button').forEach(b=> b.onclick=()=>{ if(b.dataset.tab==='lens') path=[]; go(b.dataset.tab); });
+
+const THIS_MONTH = new Date().toISOString().slice(0,7);   // 実際の今月
+
+function updatePeriodUI(){
+  const pv=document.getElementById('pv'); pv.textContent=periodLabel(period);
+  const past = period!==THIS_MONTH;
+  pv.classList.toggle('past', past);
+  document.getElementById('backtoday').hidden = !past;
+}
+
+function setPeriod(p){
+  period = p;
+  updatePeriodUI();
+  path=[]; if(TAB==='lens') renderLens(); if(TAB==='hist') renderHist(); if(TAB==='set') renderSet();
+}
+function shiftPeriod(delta){
+  let [y,m] = period.split('-').map(Number);
+  m += delta; if(m<1){m=12;y--;} if(m>12){m=1;y++;}
+  setPeriod(y + '-' + String(m).padStart(2,'0'));
+}
+document.getElementById('pprev').onclick=()=>shiftPeriod(-1);
+document.getElementById('pnext').onclick=()=>shiftPeriod(1);
+document.getElementById('pv').onclick=()=>{ if(period!==THIS_MONTH) setPeriod(THIS_MONTH); };
+document.getElementById('backtoday').onclick=()=>setPeriod(THIS_MONTH);
+
+let toastTimer=null;
+function showToast(msg){
+  const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('on');
+  if(toastTimer) clearTimeout(toastTimer);
+  toastTimer=setTimeout(()=>t.classList.remove('on'), 1900);
+}
+function esc(s){ return String(s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+/* ============================================================
+   Supabase 同期（行ベース：kakeibo_tx / kakeibo_settings）
+   ============================================================ */
+/* ▼▼▼ oshikatsu-kakeibo プロジェクトの値に貼り替える（資産トラッカーと同じプロジェクト・同じ値） ▼▼▼
+   Supabase → oshikatsu-kakeibo → Project Settings → Data API
+     ・Project URL          → SB_URL
+     ・publishable/anon key  → SB_KEY */
+var SB_URL="https://__ここに oshikatsu-kakeibo の URL__.supabase.co";
+var SB_KEY="__ここに oshikatsu-kakeibo の publishable キー__";
+/* ▲▲▲ 貼り替えここまで ▲▲▲ */
+
+var sb=null, SESSION=null, AUTHMODE='signin';
+try{ if(window.supabase) sb=window.supabase.createClient(SB_URL, SB_KEY); }catch(e){}
+
+function setSync(s){
+  const el=document.getElementById('sync'), t=document.getElementById('synct'); if(!el)return;
+  el.className='sync '+(s==='ok'?'s-ok':s==='save'?'s-save':s==='err'?'s-err':'');
+  t.textContent = s==='ok'?'同期済み':s==='save'?'保存中…':s==='err'?'エラー':'';
+}
+
+/* DB行 → アプリのtx形式 */
+function rowToTx(r){
+  return {id:r.id, date:r.date, amount:r.amount, cat:r.cat, sub:r.sub, shop:r.shop, item:r.item, taxRate:r.tax_rate};
+}
+/* アプリのtx形式 → DB行（user_id付与） */
+function txToRow(t){
+  return {user_id:SESSION.user.id, date:t.date, amount:t.amount, cat:t.cat,
+    sub:t.sub, shop:t.shop, item:t.item, tax_rate:t.taxRate};
+}
+
+function loadAll(){
+  if(!sb||!SESSION) return Promise.resolve();
+  setSync('save');
+  const p1 = sb.from('kakeibo_tx').select('*').eq('user_id',SESSION.user.id).order('date',{ascending:false})
+    .then(r=>{ if(r.error) throw r.error; TX = (r.data||[]).map(rowToTx); });
+  const p2 = sb.from('kakeibo_settings').select('data').eq('user_id',SESSION.user.id).maybeSingle()
+    .then(r=>{ if(r.data && r.data.data && r.data.data.catTree) CAT_TREE = r.data.data.catTree;
+      else { saveSettings(); } });
+  return Promise.all([p1,p2]).then(()=>setSync('ok')).catch(e=>{ console.error(e); setSync('err'); });
+}
+
+function insertTx(rows){
+  if(!sb||!SESSION){ // オフライン簡易フォールバック（ローカルのみ）
+    rows.forEach(r=>TX.push(tx(r.date,r.amount,r.cat,r.sub,r.shop,r.item,r.taxRate))); return Promise.resolve();
+  }
+  setSync('save');
+  return sb.from('kakeibo_tx').insert(rows.map(txToRow)).select()
+    .then(r=>{ if(r.error) throw r.error;
+      (r.data||[]).forEach(row=>TX.push(rowToTx(row)));   // 実IDで反映
+      setSync('ok'); if(TAB==='lens') renderLens(); if(TAB==='hist') renderHist();
+    })
+    .catch(e=>{ console.error(e); setSync('err'); });
+}
+
+function deleteTx(id){
+  if(!sb||!SESSION){ TX=TX.filter(t=>t.id!==id); return Promise.resolve(); }
+  setSync('save');
+  return sb.from('kakeibo_tx').delete().eq('id',id).eq('user_id',SESSION.user.id)
+    .then(r=>{ if(r.error) throw r.error; TX=TX.filter(t=>t.id!==id); setSync('ok'); })
+    .catch(e=>{ console.error(e); setSync('err'); });
+}
+
+function saveSettings(){
+  if(!sb||!SESSION) return;
+  setSync('save');
+  sb.from('kakeibo_settings').upsert({user_id:SESSION.user.id, data:{catTree:CAT_TREE}, updated_at:new Date().toISOString()})
+    .then(r=>setSync(r.error?'err':'ok'));
+}
+
+/* ---- auth ---- */
+function swapAuth(){
+  AUTHMODE = AUTHMODE==='signin'?'signup':'signin';
+  document.getElementById('authBtn').textContent = AUTHMODE==='signin'?'サインイン':'登録する';
+  document.getElementById('authSwap').textContent = AUTHMODE==='signin'?'アカウントを作成する':'既にアカウントをお持ちの方';
+  document.getElementById('authSub').textContent = AUTHMODE==='signin'?'サインインしてデータを同期します。':'新しいアカウントを作成します。';
+  document.getElementById('authErr').textContent='';
+  document.getElementById('authPw').setAttribute('autocomplete', AUTHMODE==='signin'?'current-password':'new-password');
+}
+function doAuth(){
+  const email=document.getElementById('authEmail').value.trim();
+  const pw=document.getElementById('authPw').value;
+  const err=document.getElementById('authErr'); err.textContent='';
+  if(!sb){ err.textContent='ライブラリを読み込めませんでした（本番URLでお試しください）。'; return; }
+  if(!email||!pw){ err.textContent='メールとパスワードを入力してください。'; return; }
+  const btn=document.getElementById('authBtn'); btn.disabled=true; btn.textContent='…';
+  const p = AUTHMODE==='signin'
+    ? sb.auth.signInWithPassword({email,password:pw})
+    : sb.auth.signUp({email,password:pw});
+  p.then(r=>{
+    btn.disabled=false; btn.textContent=AUTHMODE==='signin'?'サインイン':'登録する';
+    if(r.error){ err.textContent=r.error.message; return; }
+    if(!r.data.session){ err.textContent='確認メールを送信しました。メール内のリンクを開いてから、サインインしてください。'; AUTHMODE='signin'; swapAuth(); swapAuth(); return; }
+    enterApp(r.data.session);
+  });
+}
+function enterApp(session){
+  SESSION=session;
+  document.getElementById('auth').classList.add('hidden');
+  loadAll().then(()=>{ updatePeriodUI(); go('lens'); });
+}
+function signOut(){
+  if(sb&&SESSION) sb.auth.signOut();
+  SESSION=null; setSync(''); document.getElementById('auth').classList.remove('hidden');
+}
+
+document.getElementById('authBtn').onclick=doAuth;
+document.getElementById('authSwap').onclick=swapAuth;
+document.getElementById('authPw').addEventListener('keydown',e=>{ if(e.key==='Enter') doAuth(); });
+
+/* init */
+updatePeriodUI();
+renderLens();   // 未サインインでも背後は空で描画
+if(sb){
+  sb.auth.getSession().then(r=>{ if(r.data && r.data.session) enterApp(r.data.session); });
+}
+</script>
+</body>
+</html>
