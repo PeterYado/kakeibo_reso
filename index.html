@@ -176,6 +176,15 @@
 
   .seclab{font-size:12px; color:var(--ink3); letter-spacing:.1em; margin:20px 4px 8px;}
 
+  /* date row */
+  .daterow{display:flex; gap:8px; align-items:stretch;}
+  .datein{margin-top:0; flex:1 1 auto; -webkit-appearance:none; appearance:none;
+    font-family:var(--mono); color:var(--ink);}
+  .todaybtn{flex:0 0 auto; padding:0 16px; border:1px solid var(--line2); border-radius:11px; background:var(--surface);
+    color:var(--ink2); font-size:13px; font-family:var(--sans);}
+  .todaybtn:hover{border-color:var(--amber-line); color:var(--amber);}
+  .todaybtn.on{background:var(--amber-bg); border-color:var(--amber-line); color:var(--amber); font-weight:600;}
+
   /* item rows (多品目) */
   .itemrow{background:var(--surface); border:1px solid var(--line); border-radius:13px; padding:11px 12px; margin-bottom:8px;
     box-shadow:0 1px 0 rgba(23,33,43,.02);}
@@ -374,8 +383,18 @@ const DEFAULT_CAT_TREE = {
 };
 let CAT_TREE = JSON.parse(JSON.stringify(DEFAULT_CAT_TREE));
 
+/* ---- JST（日本時間）基準の日付。toISOString()はUTCで日付がずれるため使わない ---- */
+function jstDate(d){                 // d省略で「今」→ YYYY-MM-DD（JST）
+  const t = d ? new Date(d) : new Date();
+  const jst = new Date(t.getTime() + 9*3600*1000);   // UTC+9
+  return jst.toISOString().slice(0,10);
+}
+function jstToday(){ return jstDate(); }
+function jstMonth(){ return jstDate().slice(0,7); }
+
 /* ---- state ---- */
-let period = new Date().toISOString().slice(0,7);   // 実際の今月
+const THIS_MONTH = jstMonth();   // 今月（JST・固定）
+let period = jstMonth();   // 今月（JST）
 let path = [];            // 解像ドリルダウンの現在パス
 let TAB = 'lens';
 
@@ -540,7 +559,9 @@ function emptyMonth(){
    ============================================================ */
 // REC.items: [{name, price:'', qty:1}]  価格は税抜/税込を taxMode で解釈
 function newItem(){ return {name:'', price:'', qty:1}; }
-let REC = {taxMode:'in', cat:'', sub:'', shop:'', items:[newItem()]};
+// 記録画面の既定日付：今月を見ているなら今日、過去月なら その月の1日
+function defaultRecDate(){ return period===THIS_MONTH ? jstToday() : (period+'-01'); }
+let REC = {date:defaultRecDate(), taxMode:'in', cat:'', sub:'', shop:'', items:[newItem()]};
 
 function lineTotal(it){ const p=parseInt(it.price||'0',10)||0; const q=Math.max(1,parseInt(it.qty||'1',10)||1); return p*q; }
 function recSubtotal(){ return REC.items.reduce((s,it)=>s+lineTotal(it),0); }
@@ -563,6 +584,14 @@ function renderRec(){
     + '<div class="amtdisp'+(incl===0?' zero':'')+'"><span class="yen">¥</span><span class="v">'+incl.toLocaleString('ja-JP')+'</span></div>'
     + '<div class="taxnote">'+(REC.taxMode==='out'&&sub>0 ? '税抜 '+yen(sub)+' → 税込 '+yen(incl)+'（10%）'
         : (REC.items.length>1 ? REC.items.length+' 品目' : '')) +'</div>'
+    + '</div>';
+
+  // 日付
+  const isToday = REC.date===jstToday();
+  html += '<div class="seclab">日付</div>'
+    + '<div class="daterow">'
+    + '<input class="tin datein" id="datein" type="date" value="'+esc(REC.date)+'" max="'+jstToday()+'">'
+    + '<button class="todaybtn'+(isToday?' on':'')+'" id="todaybtn">今日</button>'
     + '</div>';
 
   // 費目
@@ -611,6 +640,8 @@ function renderRec(){
   el.querySelectorAll('.toggle button').forEach(b=> b.onclick = ()=>{ REC.taxMode=b.dataset.tax; renderRec(); });
   el.querySelectorAll('[data-cat]').forEach(b=> b.onclick = ()=>{ REC.cat=b.dataset.cat; REC.sub=''; renderRec(); });
   el.querySelectorAll('[data-sub]').forEach(b=> b.onclick = ()=>{ REC.sub=b.dataset.sub; renderRec(); });
+  const datein=document.getElementById('datein'); if(datein) datein.onchange=e=>{ REC.date=e.target.value||jstToday(); renderRec(); };
+  const todaybtn=document.getElementById('todaybtn'); if(todaybtn) todaybtn.onclick=()=>{ REC.date=jstToday(); renderRec(); };
   const shopin=document.getElementById('shopin'); if(shopin) shopin.oninput=e=>REC.shop=e.target.value;
 
   // 品目行：名前・単価はライブ更新だが再描画しない（フォーカス維持）。合計だけ更新
@@ -647,7 +678,7 @@ function updateRecTotals(){
 function saveRec(){
   const sub=recSubtotal();
   if(!(sub>0 && REC.cat)) return;
-  const d = new Date().toISOString().slice(0,10);   // 実際の今日
+  const d = REC.date || jstToday();   // 選択された日付（JST）
   const rate = REC.taxMode==='out'?0.10:null;
   const rows = [];
   REC.items.forEach(it=>{
@@ -661,7 +692,7 @@ function saveRec(){
 
   // 記録した月へ移動して結果を見せる
   period = d.slice(0,7);
-  REC = {taxMode:'in', cat:'', sub:'', shop:'', items:[newItem()]};
+  REC = {date:defaultRecDate(), taxMode:'in', cat:'', sub:'', shop:'', items:[newItem()]};
 
   insertTx(rows).then(()=>{
     showToast('記録しました　'+yen(total)+(n>1?'（'+n+'品目）':''));
@@ -672,7 +703,7 @@ function saveRec(){
 /* 履歴からの複製：内容をコピーして記録画面を開く（日付は今日／確定前に編集可能） */
 function duplicateTx(id){
   const t = TX.find(x=>x.id===id); if(!t) return;
-  REC = {taxMode: t.taxRate?'out':'in', cat:t.cat, sub:t.sub==='（未設定）'?'':t.sub,
+  REC = {date:jstToday(), taxMode: t.taxRate?'out':'in', cat:t.cat, sub:t.sub==='（未設定）'?'':t.sub,
     shop:t.shop==='（未設定）'?'':t.shop,
     items:[{name:t.item==='（品目なし）'?'':t.item,
       price:String(t.taxRate?Math.round(t.amount/1.1):t.amount), qty:1}],
@@ -759,13 +790,16 @@ function go(tab){
   document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('on', b.dataset.tab===tab));
   document.getElementById('main').scrollTop = 0;
   if(tab==='lens') renderLens();
-  if(tab==='rec') renderRec();
+  if(tab==='rec'){
+    // 空フォームで記録タブに入ったら、見ている月に合わせて既定日付を更新
+    const fresh = !REC.cat && !REC.shop && REC.items.length===1 && !REC.items[0].name && !REC.items[0].price;
+    if(fresh && !REC.editFrom) REC.date = defaultRecDate();
+    renderRec();
+  }
   if(tab==='hist') renderHist();
   if(tab==='set') renderSet();
 }
 document.querySelectorAll('#nav button').forEach(b=> b.onclick=()=>{ if(b.dataset.tab==='lens') path=[]; go(b.dataset.tab); });
-
-const THIS_MONTH = new Date().toISOString().slice(0,7);   // 実際の今月
 
 function updatePeriodUI(){
   const pv=document.getElementById('pv'); pv.textContent=periodLabel(period);
