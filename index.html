@@ -213,12 +213,17 @@
   .additem:hover{border-color:var(--amber-line); color:var(--amber);}
 
   /* duplicate button in 履歴 */
-  .dupbtn{flex:0 0 auto; width:34px; height:34px; border:1px solid var(--line); border-radius:9px; background:var(--surface);
-    color:var(--ink3); display:grid; place-items:center; margin-left:2px;}
+  .hacts{flex:0 0 auto; display:flex; gap:5px; margin-left:2px;}
+  .editbtn{flex:0 0 auto; width:32px; height:32px; border:1px solid var(--line); border-radius:9px; background:var(--surface);
+    color:var(--ink3); display:grid; place-items:center;}
+  .editbtn:hover{border-color:var(--amber-line); color:var(--amber); background:var(--amber-bg);}
+  .editbtn:active{transform:scale(.94);}
+  .dupbtn{flex:0 0 auto; width:32px; height:32px; border:1px solid var(--line); border-radius:9px; background:var(--surface);
+    color:var(--ink3); display:grid; place-items:center;}
   .dupbtn:hover{border-color:var(--amber-line); color:var(--amber); background:var(--amber-bg);}
   .dupbtn:active{transform:scale(.94);}
-  .delbtn{flex:0 0 auto; width:34px; height:34px; border:1px solid var(--line); border-radius:9px; background:var(--surface);
-    color:var(--ink3); display:grid; place-items:center; margin-left:2px;}
+  .delbtn{flex:0 0 auto; width:32px; height:32px; border:1px solid var(--line); border-radius:9px; background:var(--surface);
+    color:var(--ink3); display:grid; place-items:center;}
   .delbtn:hover{border-color:var(--crimson); color:var(--crimson); background:var(--crimson-bg);}
   .delbtn:active{transform:scale(.94);}
   .chips{display:flex; flex-wrap:wrap; gap:7px;}
@@ -232,10 +237,18 @@
   .tin:focus{outline:none; border-color:var(--amber-line); box-shadow:0 0 0 3px var(--amber-bg);}
   .tin::placeholder{color:var(--ink3);}
 
-  .rec-btn{width:100%; height:52px; margin-top:22px; border:0; border-radius:13px; background:var(--amber); color:#fff;
+  .recbar{display:flex; gap:10px; margin-top:22px;}
+  .rec-cancel{flex:0 0 34%; height:52px; border:1px solid var(--line2); border-radius:13px; background:var(--surface);
+    color:var(--ink2); font-size:14px;}
+  .rec-cancel:hover{border-color:var(--ink3); color:var(--ink);}
+  .rec-cancel:active{transform:translateY(1px);}
+  .rec-btn{flex:1 1 auto; height:52px; border:0; border-radius:13px; background:var(--amber); color:#fff;
     font-size:15px; font-weight:600; letter-spacing:.02em; box-shadow:0 6px 16px rgba(168,105,10,.28);}
   .rec-btn:disabled{background:var(--line2); color:var(--surface); box-shadow:none;}
   .rec-btn:not(:disabled):active{transform:translateY(1px);}
+  .editbanner{background:var(--amber-bg); border:1px solid var(--amber-line); color:var(--amber); border-radius:12px;
+    padding:10px 14px; font-size:13px; font-weight:600; margin-bottom:12px;}
+  .editbanner span{display:block; font-weight:400; font-size:11.5px; color:var(--ink3); margin-top:2px;}
 
   /* ---- 履歴 ---- */
   .daygroup{margin-top:16px;}
@@ -575,7 +588,8 @@ function renderRec(){
   const incl = recTotalIncl();
 
   // 上部：合計リードアウト + 税トグル
-  let html = '<div class="amtcard">'
+  let html = REC.editId ? '<div class="editbanner">記録を編集中 <span>1件を上書き保存します</span></div>' : '';
+  html += '<div class="amtcard">'
     + '<div class="top"><span class="lab">合計</span>'
     + '<div class="toggle">'
     + '<button data-tax="in" class="'+(REC.taxMode==='in'?'on':'')+'">税込</button>'
@@ -628,11 +642,14 @@ function renderRec(){
       + '</div>'
       + '</div>';
   });
-  html += '<button class="additem" id="additem">＋ 品目を追加</button>';
+  html += REC.editId ? '' : '<button class="additem" id="additem">＋ 品目を追加</button>';
 
   const ok = sub>0 && REC.cat;
-  html += '<button class="rec-btn" id="recbtn" '+(ok?'':'disabled')+'>'
-    + (REC.editFrom?'複製して記録する':'記録する') + '</button>';
+  const mainLabel = REC.editId ? '更新する' : (REC.editFrom ? '複製して記録する' : '記録する');
+  html += '<div class="recbar">'
+    + '<button class="rec-cancel" id="reccancel">キャンセル</button>'
+    + '<button class="rec-btn" id="recbtn" '+(ok?'':'disabled')+'>'+mainLabel+'</button>'
+    + '</div>';
 
   el.innerHTML = html;
 
@@ -658,6 +675,13 @@ function renderRec(){
   el.querySelectorAll('.ir-del').forEach(b=> b.onclick=()=>{ REC.items.splice(+b.dataset.idx,1); renderRec(); });
   const add=document.getElementById('additem'); if(add) add.onclick=()=>{ REC.items.push(newItem()); renderRec(); };
   const rb=document.getElementById('recbtn'); if(rb) rb.onclick=saveRec;
+  const rc=document.getElementById('reccancel'); if(rc) rc.onclick=cancelRec;
+}
+
+// 記録のキャンセル：フォームを初期化して解像へ戻る
+function cancelRec(){
+  REC = {date:defaultRecDate(), taxMode:'in', cat:'', sub:'', shop:'', items:[newItem()]};
+  go('lens');
 }
 
 // 再描画せず合計表示だけ更新（入力中フォーカスを保つ）
@@ -680,6 +704,23 @@ function saveRec(){
   if(!(sub>0 && REC.cat)) return;
   const d = REC.date || jstToday();   // 選択された日付（JST）
   const rate = REC.taxMode==='out'?0.10:null;
+
+  // ---- 編集モード：既存の1行を上書き（update）----
+  if(REC.editId){
+    const it = REC.items[0];
+    const lt = lineTotal(it); if(lt<=0) return;
+    const amount = REC.taxMode==='out'?Math.round(lt*1.1):lt;
+    const patch = {date:d, amount, cat:REC.cat, sub:REC.sub||'（未設定）',
+      shop:REC.shop||'（未設定）', item:it.name||'（品目なし）', taxRate:rate};
+    const id = REC.editId;
+    period = d.slice(0,7);
+    REC = {date:defaultRecDate(), taxMode:'in', cat:'', sub:'', shop:'', items:[newItem()]};
+    updateTx(id, patch).then(()=>showToast('更新しました　'+yen(amount)));
+    updatePeriodUI(); path=[]; go('lens');
+    return;
+  }
+
+  // ---- 通常：新規記録（品目ごとに行を分割して insert）----
   const rows = [];
   REC.items.forEach(it=>{
     const lt=lineTotal(it); if(lt<=0) return;
@@ -698,6 +739,17 @@ function saveRec(){
     showToast('記録しました　'+yen(total)+(n>1?'（'+n+'品目）':''));
   });
   updatePeriodUI(); path=[]; go('lens');
+}
+
+/* 履歴からの編集：既存の行を「編集モード」で開く（IDそのまま・上書き保存） */
+function editTx(id){
+  const t = TX.find(x=>x.id===id); if(!t) return;
+  REC = {date:t.date, taxMode: t.taxRate?'out':'in', cat:t.cat, sub:t.sub==='（未設定）'?'':t.sub,
+    shop:t.shop==='（未設定）'?'':t.shop,
+    items:[{name:t.item==='（品目なし）'?'':t.item,
+      price:String(t.taxRate?Math.round(t.amount/1.1):t.amount), qty:1}],
+    editId:id};
+  go('rec');
 }
 
 /* 履歴からの複製：内容をコピーして記録画面を開く（日付は今日／確定前に編集可能） */
@@ -733,15 +785,19 @@ function renderHist(){
         + '<div class="body"><div class="l1">'+esc(t.item)+'</div>'
         + '<div class="l2">'+esc(t.cat)+' › '+esc(t.sub)+' › '+esc(t.shop)+'</div></div>'
         + '<span class="val">'+yen(t.amount)+'</span>'
-        + '<button class="dupbtn" data-id="'+t.id+'" aria-label="この記録を複製">'
-        + '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="9" y="9" width="11" height="11" rx="2.5"/><path d="M5 15V6a2 2 0 0 1 2-2h8"/></svg></button>'
-        + '<button class="delbtn" data-id="'+t.id+'" aria-label="この記録を削除">'
-        + '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 7h14M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button>'
-        + '</div>';
+        + '<div class="hacts">'
+        + '<button class="editbtn" data-id="'+t.id+'" aria-label="編集">'
+        + '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 20h4L18 10l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg></button>'
+        + '<button class="dupbtn" data-id="'+t.id+'" aria-label="複製">'
+        + '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="9" y="9" width="11" height="11" rx="2.5"/><path d="M5 15V6a2 2 0 0 1 2-2h8"/></svg></button>'
+        + '<button class="delbtn" data-id="'+t.id+'" aria-label="削除">'
+        + '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 7h14M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button>'
+        + '</div></div>';
     });
     html += '</div>';
   });
   el.innerHTML = html;
+  el.querySelectorAll('.editbtn').forEach(b=> b.onclick=()=>editTx(b.dataset.id));
   el.querySelectorAll('.dupbtn').forEach(b=> b.onclick=()=>duplicateTx(b.dataset.id));
   el.querySelectorAll('.delbtn').forEach(b=> b.onclick=()=>{
     if(confirm('この記録を削除しますか？')) deleteTx(b.dataset.id).then(()=>renderHist());
@@ -890,6 +946,19 @@ function deleteTx(id){
   setSync('save');
   return sb.from('kakeibo_tx').delete().eq('id',id).eq('user_id',SESSION.user.id)
     .then(r=>{ if(r.error) throw r.error; TX=TX.filter(t=>t.id!==id); setSync('ok'); })
+    .catch(e=>{ console.error(e); setSync('err'); });
+}
+
+function updateTx(id, patch){
+  // patch: {date, amount, cat, sub, shop, item, taxRate}
+  const applyLocal=()=>{ const i=TX.findIndex(t=>t.id===id); if(i>=0) TX[i]={...TX[i], ...patch}; };
+  if(!sb||!SESSION){ applyLocal(); return Promise.resolve(); }
+  setSync('save');
+  const row={date:patch.date, amount:patch.amount, cat:patch.cat, sub:patch.sub,
+    shop:patch.shop, item:patch.item, tax_rate:patch.taxRate};
+  return sb.from('kakeibo_tx').update(row).eq('id',id).eq('user_id',SESSION.user.id)
+    .then(r=>{ if(r.error) throw r.error; applyLocal(); setSync('ok');
+      if(TAB==='lens') renderLens(); if(TAB==='hist') renderHist(); })
     .catch(e=>{ console.error(e); setSync('err'); });
 }
 
