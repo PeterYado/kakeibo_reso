@@ -267,13 +267,26 @@
   .card{background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:14px; margin-top:12px;}
   .card h3{font-size:13px; color:var(--ink2); font-weight:600; margin-bottom:4px;}
   .card p.note{font-size:12px; color:var(--ink3); line-height:1.5;}
-  .treerow{display:flex; align-items:center; gap:10px; padding:9px 2px; border-bottom:1px solid var(--line);}
-  .treerow:last-child{border-bottom:0;}
-  .treerow .h{width:8px; height:8px; border-radius:2px; background:var(--amber); flex:0 0 auto;}
-  .treerow .nm{flex:1 1 auto; font-size:14px;}
-  .treerow .ct{font-family:var(--mono); font-size:11px; color:var(--ink3);}
-  .treerow .mv{color:var(--ink3); display:grid; place-items:center; width:26px; height:26px; border:1px solid var(--line);
-    border-radius:7px; background:var(--surface);}
+  /* 費目ツリー編集 */
+  .treewrap{margin-top:12px;}
+  .catblock{border:1px solid var(--line); border-radius:12px; margin-bottom:10px; overflow:hidden; background:var(--surface);}
+  .catrow{display:flex; align-items:center; gap:9px; padding:11px 12px; background:var(--surface2); border-bottom:1px solid var(--line);}
+  .catrow .chandle{width:9px; height:9px; border-radius:2px; background:var(--amber); flex:0 0 auto;}
+  .catrow .cnm{flex:1 1 auto; font-size:14px; font-weight:600; color:var(--ink); min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .cacts{display:flex; gap:4px; flex:0 0 auto;}
+  .tbtn{width:28px; height:28px; border:1px solid var(--line); border-radius:7px; background:var(--surface);
+    color:var(--ink2); display:grid; place-items:center; font-size:11px; padding:0;}
+  .tbtn:hover:not(:disabled){border-color:var(--amber-line); color:var(--amber);}
+  .tbtn:disabled{opacity:.3; cursor:default;}
+  .tbtn.del:hover:not(:disabled){border-color:var(--crimson); color:var(--crimson);}
+  .tbtn.sm{width:26px; height:26px;}
+  .subwrap{padding:8px 12px 10px;}
+  .subrow{display:flex; align-items:center; gap:8px; padding:6px 0;}
+  .subrow .subdot{width:5px; height:5px; border-radius:50%; background:var(--line2); flex:0 0 auto; margin-left:3px;}
+  .subrow .snm{flex:1 1 auto; font-size:13.5px; color:var(--ink); min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .addsub{width:100%; height:34px; margin-top:4px; border:1px dashed var(--line2); border-radius:9px; background:var(--surface);
+    color:var(--ink3); font-size:12px;}
+  .addsub:hover{border-color:var(--amber-line); color:var(--amber);}
   .ghost-btn{width:100%; height:44px; border:1px dashed var(--line2); border-radius:11px; background:var(--surface);
     color:var(--ink2); font-size:13px; margin-top:10px;}
   .ghost-btn:hover{border-color:var(--amber-line); color:var(--amber);}
@@ -810,30 +823,112 @@ function wday(d){ return ['日','月','火','水','木','金','土'][new Date(d+
    ============================================================ */
 function renderSet(){
   const el = document.getElementById('v-set');
-  const counts = {};
-  inPeriod().forEach(t=>{ counts[t.cat]=(counts[t.cat]||0)+1; });
+  const cats = Object.keys(CAT_TREE);
+
   let tree = '';
-  Object.keys(CAT_TREE).forEach(c=>{
-    tree += '<div class="treerow"><span class="h"></span><span class="nm">'+esc(c)+'</span>'
-      + '<span class="ct">'+(CAT_TREE[c].length)+' 区分</span>'
-      + '<button class="mv" aria-label="並べ替え"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 9l4-4 4 4M8 15l4 4 4-4"/></svg></button></div>';
+  cats.forEach((c,ci)=>{
+    const subs = CAT_TREE[c]||[];
+    tree += '<div class="catblock">'
+      + '<div class="catrow">'
+      +   '<span class="chandle"></span>'
+      +   '<span class="cnm">'+esc(c)+'</span>'
+      +   '<div class="cacts">'
+      +     '<button class="tbtn" data-act="cup" data-c="'+ci+'" '+(ci===0?'disabled':'')+' aria-label="上へ">▲</button>'
+      +     '<button class="tbtn" data-act="cdn" data-c="'+ci+'" '+(ci===cats.length-1?'disabled':'')+' aria-label="下へ">▼</button>'
+      +     '<button class="tbtn" data-act="cren" data-c="'+ci+'" aria-label="改名">'
+      +       '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 20h4L18 10l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg></button>'
+      +     '<button class="tbtn del" data-act="cdel" data-c="'+ci+'" aria-label="削除">'
+      +       '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 7h14M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button>'
+      +   '</div>'
+      + '</div>';
+    // 区分
+    tree += '<div class="subwrap">';
+    subs.forEach((s,si)=>{
+      tree += '<div class="subrow">'
+        +   '<span class="subdot"></span><span class="snm">'+esc(s)+'</span>'
+        +   '<div class="cacts">'
+        +     '<button class="tbtn sm" data-act="sup" data-c="'+ci+'" data-s="'+si+'" '+(si===0?'disabled':'')+'>▲</button>'
+        +     '<button class="tbtn sm" data-act="sdn" data-c="'+ci+'" data-s="'+si+'" '+(si===subs.length-1?'disabled':'')+'>▼</button>'
+        +     '<button class="tbtn sm" data-act="sren" data-c="'+ci+'" data-s="'+si+'" aria-label="改名">'
+        +       '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 20h4L18 10l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg></button>'
+        +     '<button class="tbtn sm del" data-act="sdel" data-c="'+ci+'" data-s="'+si+'" aria-label="削除">✕</button>'
+        +   '</div>'
+        + '</div>';
+    });
+    tree += '<button class="addsub" data-act="sadd" data-c="'+ci+'">＋ 区分を追加</button>';
+    tree += '</div></div>';
   });
+
   el.innerHTML =
     '<div class="card"><h3>費目の管理 <span class="stub">カスタマイズ</span></h3>'
-    + '<p class="note">費目（大きな区分）を自由に追加・削除・改名・並べ替え。店と品目は入力時に自由入力＋自動補完なので、ここでは管理しません。</p>'
-    + '<div style="margin-top:10px;">'+tree+'</div>'
-    + '<button class="ghost-btn">＋ 費目を追加</button></div>'
+    + '<p class="note">費目と区分を自由に追加・改名・削除・並べ替えできます。店と品目は記録時の自由入力なので、ここでは管理しません。<br>ここでの変更は<b>これからの入力候補</b>に反映されます。過去の記録はそのまま残ります。</p>'
+    + '<div class="treewrap">'+tree+'</div>'
+    + '<button class="ghost-btn" data-act="cadd">＋ 費目を追加</button></div>'
 
     + '<div class="card"><h3>税率のきほん</h3>'
     + '<p class="note">金額は<b>税込</b>がきほん。レシートの総額をそのまま入力します。税抜で入れたいときだけ、記録画面で「税抜」に切り替えると 10% を計算します。</p></div>'
 
     + '<div class="card"><h3>アカウント</h3>'
     + '<p class="note" style="margin-bottom:10px;">'+(SESSION?esc(SESSION.user.email):'未サインイン')
-    + '<br>変更は自動でクラウド（kakeibo_tx）に保存され、どの端末でも同じデータが見られます。</p>'
+    + '<br>変更は自動でクラウドに保存され、どの端末でも同じデータが見られます。</p>'
     + '<button class="ghost-btn" id="signoutbtn">サインアウト</button></div>';
 
-  el.querySelectorAll('.ghost-btn')[0]?.addEventListener('click',()=>showToast('費目の編集は次のアップデートで'));
+  el.querySelectorAll('[data-act]').forEach(b=> b.onclick=()=>treeAction(b.dataset));
   const so=document.getElementById('signoutbtn'); if(so) so.onclick=signOut;
+}
+
+/* 費目ツリー編集。方針A：過去データには触れない（入力候補のみ変更） */
+function treeAction(ds){
+  const cats = Object.keys(CAT_TREE);
+  const ci = ds.c!=null ? +ds.c : null;
+  const si = ds.s!=null ? +ds.s : null;
+  const cat = ci!=null ? cats[ci] : null;
+
+  function rebuild(order){ // 費目の順序を保った新オブジェクトを作る
+    const next={}; order.forEach(k=>{ next[k]=CAT_TREE[k]; }); CAT_TREE=next;
+  }
+
+  switch(ds.act){
+    case 'cadd': {
+      const name=(prompt('新しい費目の名前')||'').trim(); if(!name) return;
+      if(CAT_TREE[name]){ showToast('同じ名前の費目があります'); return; }
+      CAT_TREE[name]=[]; break;
+    }
+    case 'cren': {
+      const name=(prompt('費目の名前を変更', cat)||'').trim(); if(!name||name===cat) return;
+      if(CAT_TREE[name]){ showToast('同じ名前の費目があります'); return; }
+      const next={}; cats.forEach(k=>{ if(k===cat) next[name]=CAT_TREE[cat]; else next[k]=CAT_TREE[k]; }); CAT_TREE=next;
+      break;
+    }
+    case 'cdel': {
+      const n=CAT_TREE[cat].length;
+      if(!confirm('費目「'+cat+'」'+(n?'（'+n+'区分）':'')+'を削除しますか？\n※これまでの記録はそのまま残ります。')) return;
+      const next={...CAT_TREE}; delete next[cat]; CAT_TREE=next; break;
+    }
+    case 'cup': { if(ci<=0) return; const o=cats.slice(); [o[ci-1],o[ci]]=[o[ci],o[ci-1]]; rebuild(o); break; }
+    case 'cdn': { if(ci>=cats.length-1) return; const o=cats.slice(); [o[ci+1],o[ci]]=[o[ci],o[ci+1]]; rebuild(o); break; }
+    case 'sadd': {
+      const name=(prompt('「'+cat+'」に追加する区分名')||'').trim(); if(!name) return;
+      if(CAT_TREE[cat].includes(name)){ showToast('同じ区分があります'); return; }
+      CAT_TREE[cat]=CAT_TREE[cat].concat([name]); break;
+    }
+    case 'sren': {
+      const old=CAT_TREE[cat][si];
+      const name=(prompt('区分の名前を変更', old)||'').trim(); if(!name||name===old) return;
+      if(CAT_TREE[cat].includes(name)){ showToast('同じ区分があります'); return; }
+      CAT_TREE[cat]=CAT_TREE[cat].map((x,i)=>i===si?name:x); break;
+    }
+    case 'sdel': {
+      const s=CAT_TREE[cat][si];
+      if(!confirm('区分「'+s+'」を削除しますか？\n※これまでの記録はそのまま残ります。')) return;
+      CAT_TREE[cat]=CAT_TREE[cat].filter((_,i)=>i!==si); break;
+    }
+    case 'sup': { if(si<=0) return; const a=CAT_TREE[cat].slice(); [a[si-1],a[si]]=[a[si],a[si-1]]; CAT_TREE[cat]=a; break; }
+    case 'sdn': { const a=CAT_TREE[cat].slice(); if(si>=a.length-1) return; [a[si+1],a[si]]=[a[si],a[si+1]]; CAT_TREE[cat]=a; break; }
+    default: return;
+  }
+  saveSettings();
+  renderSet();
 }
 
 /* ============================================================
