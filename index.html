@@ -101,6 +101,44 @@
   .rtotal .shr{margin-left:auto; font-family:var(--mono); font-size:12px; color:var(--ink2);
     background:var(--surface2); border:1px solid var(--line); border-radius:999px; padding:3px 9px; align-self:center;}
 
+  /* 収支バー */
+  .balance{width:100%; margin-top:10px; background:var(--surface); border:1px solid var(--line); border-radius:14px;
+    padding:12px 14px; display:flex; align-items:center; gap:10px; text-align:left; box-shadow:0 1px 0 rgba(23,33,43,.03); position:relative;}
+  .balance:hover{border-color:var(--line2);}
+  .balance .bcol{display:flex; flex-direction:column; gap:3px; min-width:0;}
+  .balance .bk{font-size:10.5px; color:var(--ink3); letter-spacing:.06em;}
+  .balance .bv{font-family:var(--mono); font-size:14px; font-weight:500; color:var(--ink); white-space:nowrap;}
+  .balance .bv.in{color:var(--ok);}
+  .balance .bv.out{color:var(--ink);}
+  .balance .bv.net.pos{color:var(--ok);}
+  .balance .bv.net.neg{color:var(--crimson);}
+  .balance .bop{font-family:var(--mono); color:var(--ink3); font-size:13px; align-self:flex-end; padding-bottom:1px;}
+  .balance .bedit{margin-left:auto; align-self:center; font-size:11px; font-family:var(--mono); color:var(--amber);
+    background:var(--amber-bg); border:1px solid var(--amber-line); border-radius:999px; padding:3px 9px; white-space:nowrap;}
+  .balance.empty .bedit{color:var(--amber);}
+
+  /* 収入モーダル */
+  .modal-bg{position:fixed; inset:0; z-index:60; background:rgba(23,33,43,.42); display:flex; align-items:flex-end; justify-content:center;}
+  .modal-bg[hidden]{display:none;}
+  .isheet{width:100%; max-width:var(--maxw); max-height:88dvh; background:var(--paper); border-radius:18px 18px 0 0;
+    display:flex; flex-direction:column; overflow:hidden;}
+  .isheet-scroll{overflow-y:auto; flex:1 1 auto; padding:18px 16px 0; min-height:0;}
+  .ihead{display:flex; align-items:center; justify-content:space-between;}
+  .ihead h2{font-size:16px; font-weight:600;}
+  .ix{background:none; border:0; font-size:22px; color:var(--ink3); width:32px; height:32px;}
+  #incomeNote{margin:6px 0 14px;}
+  .irow{display:flex; gap:8px; align-items:center; margin-bottom:8px;}
+  .irow .ilabel{flex:1 1 auto; margin-top:0; height:44px;}
+  .irow .iamt{flex:0 0 44%; display:flex; align-items:center; border:1px solid var(--line2); border-radius:11px;
+    background:var(--surface); padding-left:11px; height:44px;}
+  .irow .iamt .pfx{font-family:var(--mono); color:var(--ink2);}
+  .irow .iamtin{border:0; background:none; height:42px; width:100%; padding:0 10px; font-size:15px; text-align:right; color:var(--ink);}
+  .irow .iamtin:focus{outline:none;}
+  .irow .iamt:focus-within{border-color:var(--ok); box-shadow:0 0 0 3px rgba(14,124,107,.14);}
+  .iformbar{flex:0 0 auto; background:var(--paper); border-top:1px solid var(--line2); padding:12px 16px calc(12px + env(safe-area-inset-bottom));}
+  .irow-sum{display:flex; justify-content:space-between; align-items:baseline; margin-bottom:10px; font-size:13px; color:var(--ink2);}
+  .irow-sum .num{font-size:17px; font-weight:600; color:var(--ok);}
+
   .fieldhead{display:flex; justify-content:space-between; align-items:baseline; margin:20px 4px 8px;}
   .fieldhead .t{font-size:12px; color:var(--ink3); letter-spacing:.1em;}
   .fieldhead .c{font-family:var(--mono); font-size:11px; color:var(--ink3);}
@@ -380,6 +418,20 @@
   </nav>
 </div>
 <div class="toast" id="toast"></div>
+<div class="modal-bg" id="incomeModal" hidden>
+  <div class="isheet">
+    <div class="isheet-scroll">
+      <div class="ihead"><h2 id="incomeTitle">収入</h2><button class="ix" id="incomeClose" aria-label="閉じる">×</button></div>
+      <p class="note" id="incomeNote">この月に入ってきたお金を記録します。給料・ボーナスなどを分けて足せます。</p>
+      <div id="incomeList"></div>
+      <button class="addsub" id="incomeAdd">＋ 収入を追加</button>
+    </div>
+    <div class="iformbar">
+      <div class="irow-sum"><span>今月の収入</span><span class="num" id="incomeSum">¥0</span></div>
+      <button class="rec-btn" id="incomeDone" style="width:100%;">完了</button>
+    </div>
+  </div>
+</div>
 
 <script>
 /* ============================================================
@@ -398,6 +450,11 @@ let TX = [];   // クラウド(kakeibo_tx)から読み込む
 function tx(date, amount, cat, sub, shop, item, taxRate){
   return {id:'t'+Math.random().toString(36).slice(2,9), date, amount, cat, sub, shop, item, taxRate:taxRate||null};
 }
+
+/* ---- 収入（月別・複数行・支出とは別軸） ---- */
+let INCOME = [];   // {id, ym:'YYYY-MM', label, amount}
+function incomeInMonth(ym){ return INCOME.filter(x=>x.ym===ym); }
+function incomeTotal(ym){ return incomeInMonth(ym).reduce((s,x)=>s+(x.amount||0),0); }
 
 /* ---- category tree (設定の커스터마이징 대상・kakeibo_settingsから読み込む) ---- */
 const DEFAULT_CAT_TREE = {
@@ -483,6 +540,23 @@ function renderLens(){
     + (path.length ? '<span class="shr">全体の '+share+'%</span>' : '<span class="shr">'+period.slice(5)+'月</span>')
     + '</div></div>';
 
+  // 収支バー（全体表示のときだけ・顕微鏡には混ぜない）
+  if(path.length===0){
+    const income = incomeTotal(period);
+    const spend = periodTotal;
+    const net = income - spend;
+    const pos = net>=0;
+    html += '<button class="balance'+(income||spend?'':' empty')+'" id="balancebtn">'
+      + '<div class="bcol"><span class="bk">収入</span><span class="bv in">'+(income?yen(income):'—')+'</span></div>'
+      + '<span class="bop">−</span>'
+      + '<div class="bcol"><span class="bk">支出</span><span class="bv out">'+yen(spend)+'</span></div>'
+      + '<span class="bop">=</span>'
+      + '<div class="bcol"><span class="bk">収支</span><span class="bv net '+(pos?'pos':'neg')+'">'
+      +   (income? (pos?'+':'−')+yen(Math.abs(net)) : '—')+'</span></div>'
+      + '<span class="bedit">'+(income?'編集':'収入を入力')+'</span>'
+      + '</button>';
+  }
+
   // 年グラフ（現在の배율を追従）— 空月でも常に表示（他の月への手がかりになる）
   html += renderMonthly();
 
@@ -534,6 +608,7 @@ function bindLensEvents(el){
     b.onclick = ()=>{ if(b.dataset.mk!==period){ period=b.dataset.mk;
       updatePeriodUI(); renderLens(); } };
   });
+  const bb=el.querySelector('#balancebtn'); if(bb) bb.onclick=openIncome;
 
   // animate bars (zoom feel)
   const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -765,6 +840,49 @@ function editTx(id){
   go('rec');
 }
 
+/* ============================================================
+   収入モーダル（月別・複数行）
+   ============================================================ */
+let INCOME_DRAFT = [];   // 編集中の作業コピー [{id?, label, amount, _new?, _del?}]
+
+function openIncome(){
+  // 現在の月の収入を作業コピーに
+  INCOME_DRAFT = incomeInMonth(period).map(x=>({id:x.id, label:x.label, amount:x.amount}));
+  if(INCOME_DRAFT.length===0) INCOME_DRAFT.push({label:'給料', amount:'', _new:true});
+  document.getElementById('incomeTitle').textContent = periodLabel(period)+' の収入';
+  document.getElementById('incomeModal').hidden=false;
+  renderIncomeList();
+}
+function closeIncome(){ document.getElementById('incomeModal').hidden=true; }
+
+function renderIncomeList(){
+  const box=document.getElementById('incomeList');
+  let html='';
+  INCOME_DRAFT.forEach((r,i)=>{
+    html += '<div class="irow" data-i="'+i+'">'
+      + '<input class="tin ilabel" data-i="'+i+'" placeholder="ラベル（例：給料）" value="'+esc(r.label||'')+'">'
+      + '<div class="iamt"><span class="pfx">¥</span><input class="iamtin num" data-i="'+i+'" inputmode="numeric" placeholder="金額" value="'+esc(String(r.amount||''))+'"></div>'
+      + '<button class="ir-del idel" data-i="'+i+'" aria-label="削除">✕</button>'
+      + '</div>';
+  });
+  box.innerHTML=html;
+  box.querySelectorAll('.ilabel').forEach(inp=> inp.oninput=e=>{ INCOME_DRAFT[+e.target.dataset.i].label=e.target.value; });
+  box.querySelectorAll('.iamtin').forEach(inp=> inp.oninput=e=>{
+    INCOME_DRAFT[+e.target.dataset.i].amount=e.target.value.replace(/[^0-9]/g,''); updateIncomeSum(); });
+  box.querySelectorAll('.idel').forEach(b=> b.onclick=()=>{ INCOME_DRAFT.splice(+b.dataset.i,1); renderIncomeList(); });
+  updateIncomeSum();
+}
+function updateIncomeSum(){
+  const sum=INCOME_DRAFT.reduce((s,r)=>s+(parseInt(r.amount||'0',10)||0),0);
+  document.getElementById('incomeSum').textContent=yen(sum);
+}
+function doneIncome(){
+  // 空行（ラベルも金額も空、または金額0）は捨てる
+  const rows = INCOME_DRAFT.map(r=>({id:r.id, label:(r.label||'').trim()||'収入', amount:parseInt(r.amount||'0',10)||0}))
+    .filter(r=>r.amount>0);
+  saveIncome(period, rows).then(()=>{ closeIncome(); if(TAB==='lens') renderLens(); });
+}
+
 /* 履歴からの複製：内容をコピーして記録画面を開く（日付は今日／確定前に編集可能） */
 function duplicateTx(id){
   const t = TX.find(x=>x.id===id); if(!t) return;
@@ -974,6 +1092,12 @@ document.getElementById('pnext').onclick=()=>shiftPeriod(1);
 document.getElementById('pv').onclick=()=>{ if(period!==THIS_MONTH) setPeriod(THIS_MONTH); };
 document.getElementById('backtoday').onclick=()=>setPeriod(THIS_MONTH);
 
+// 収入モーダル
+document.getElementById('incomeAdd').onclick=()=>{ INCOME_DRAFT.push({label:'', amount:'', _new:true}); renderIncomeList(); };
+document.getElementById('incomeClose').onclick=closeIncome;
+document.getElementById('incomeDone').onclick=doneIncome;
+document.getElementById('incomeModal').onclick=e=>{ if(e.target.id==='incomeModal') closeIncome(); };
+
 let toastTimer=null;
 function showToast(msg){
   const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('on');
@@ -1020,7 +1144,9 @@ function loadAll(){
   const p2 = sb.from('kakeibo_settings').select('data').eq('user_id',SESSION.user.id).maybeSingle()
     .then(r=>{ if(r.data && r.data.data && r.data.data.catTree) CAT_TREE = r.data.data.catTree;
       else { saveSettings(); } });
-  return Promise.all([p1,p2]).then(()=>setSync('ok')).catch(e=>{ console.error(e); setSync('err'); });
+  const p3 = sb.from('kakeibo_income').select('*').eq('user_id',SESSION.user.id)
+    .then(r=>{ if(r.error) throw r.error; INCOME = (r.data||[]).map(x=>({id:x.id, ym:x.ym, label:x.label, amount:x.amount})); });
+  return Promise.all([p1,p2,p3]).then(()=>setSync('ok')).catch(e=>{ console.error(e); setSync('err'); });
 }
 
 function insertTx(rows){
@@ -1062,6 +1188,25 @@ function saveSettings(){
   setSync('save');
   sb.from('kakeibo_settings').upsert({user_id:SESSION.user.id, data:{catTree:CAT_TREE}, updated_at:new Date().toISOString()})
     .then(r=>setSync(r.error?'err':'ok'));
+}
+
+/* その月の収入を洗い替え保存（delete → insert）。rows: [{label, amount}] */
+function saveIncome(ym, rows){
+  // ローカル即時反映
+  INCOME = INCOME.filter(x=>x.ym!==ym).concat(rows.map(r=>({id:'i'+Math.random().toString(36).slice(2,9), ym, label:r.label, amount:r.amount})));
+  if(!sb||!SESSION) return Promise.resolve();
+  setSync('save');
+  return sb.from('kakeibo_income').delete().eq('user_id',SESSION.user.id).eq('ym',ym)
+    .then(r=>{ if(r.error) throw r.error;
+      if(!rows.length) return {data:[]};
+      return sb.from('kakeibo_income').insert(rows.map(r=>({user_id:SESSION.user.id, ym, label:r.label, amount:r.amount}))).select();
+    })
+    .then(r=>{ if(r.error) throw r.error;
+      // 実IDで置き換え
+      INCOME = INCOME.filter(x=>x.ym!==ym).concat((r.data||[]).map(x=>({id:x.id, ym:x.ym, label:x.label, amount:x.amount})));
+      setSync('ok');
+    })
+    .catch(e=>{ console.error(e); setSync('err'); });
 }
 
 /* ---- auth ---- */
