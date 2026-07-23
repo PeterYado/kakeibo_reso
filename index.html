@@ -4,6 +4,29 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>RESO — 支出解像</title>
+
+<!-- ============================================================
+     アイコン設定 ／ どのアイコンがどこに出るか
+     ------------------------------------------------------------
+     favicon.svg          … PCブラウザの【タブ】とブックマーク（モダンブラウザ）
+     favicon-32.png       … 同上のフォールバック（SVG非対応の古いブラウザ）
+     apple-touch-icon.png … iPhone/iPad「ホーム画面に追加」の【アプリアイコン】
+                             ※iOSはSVG不可・180×180のPNG／角丸はOS側で付く
+     icon-192.png         … Android のホーム画面／PWA一覧（manifest経由）
+     icon-512.png         … Android の起動スプラッシュ・大きい表示（manifest経由）
+     manifest.webmanifest … アプリ名・テーマ色・全画面表示などの設定
+     ※すべて index.html と同じ階層に置くこと（相対パス）
+     ============================================================ -->
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#17212B">
+<!-- iOSホーム画面から開いたときブラウザUIなしで起動（アプリらしく） -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="RESO">
+
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+JP:wght@400;500;600;700&display=swap" rel="stylesheet">
