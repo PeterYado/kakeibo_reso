@@ -273,6 +273,32 @@
     color:var(--ink2); font-size:13px; margin-top:2px;}
   .additem:hover{border-color:var(--amber-line); color:var(--amber);}
 
+  /* 繰り返し */
+  .repeatbox{margin-top:18px; background:var(--surface); border:1px solid var(--line); border-radius:13px; padding:14px;}
+  .repeatbox.on{border-color:var(--amber-line);}
+  .repeattoggle{display:flex; align-items:center; justify-content:space-between; cursor:pointer;}
+  .repeattoggle .rt-txt{font-size:14px; font-weight:500; color:var(--ink);}
+  .switch{width:44px; height:26px; border-radius:999px; background:var(--line2); position:relative; transition:background .18s; flex:0 0 auto;}
+  .switch .knob{position:absolute; top:3px; left:3px; width:20px; height:20px; border-radius:50%; background:#fff; transition:left .18s; box-shadow:0 1px 3px rgba(0,0,0,.2);}
+  .switch.on{background:var(--amber);}
+  .switch.on .knob{left:21px;}
+  .rep-note{font-size:12px; color:var(--ink3); margin:12px 0 10px; line-height:1.5;}
+  .rep-ends{display:flex; gap:6px; flex-wrap:wrap;}
+  .rep-end{flex:1 1 0; min-width:0; padding:9px 6px; border:1px solid var(--line2); border-radius:9px; background:var(--surface);
+    color:var(--ink2); font-size:12.5px; white-space:nowrap;}
+  .rep-end.on{background:var(--amber-bg); border-color:var(--amber-line); color:var(--amber); font-weight:600;}
+  .rep-detail{display:flex; align-items:center; gap:8px; margin-top:10px; font-size:13px; color:var(--ink2); flex-wrap:wrap;}
+  .rep-detail .rep-in{margin-top:0;}
+
+  /* 範囲選択モーダル */
+  .scope-btns{display:flex; flex-direction:column; gap:9px; margin-top:6px; padding-bottom:8px;}
+  .scope-b{text-align:left; padding:14px; border:1px solid var(--line2); border-radius:12px; background:var(--surface);
+    color:var(--ink); font-size:15px; font-weight:600; display:flex; flex-direction:column; gap:3px;}
+  .scope-b span{font-weight:400; font-size:12px; color:var(--ink3);}
+  .scope-b:hover{border-color:var(--amber-line);}
+  .scope-b.danger{color:var(--crimson);}
+  .scope-b.danger:hover{border-color:var(--crimson);}
+
   /* duplicate button in 履歴 */
   .hacts{flex:0 0 auto; display:flex; gap:5px; margin-left:2px;}
   .editbtn{flex:0 0 auto; width:32px; height:32px; border:1px solid var(--line); border-radius:9px; background:var(--surface);
@@ -462,6 +488,16 @@
   </div>
 </div>
 
+<div class="modal-bg" id="scopeModal" hidden>
+  <div class="isheet" style="max-height:none;">
+    <div class="isheet-scroll" style="padding-bottom:16px;">
+      <div class="ihead"><h2 id="scopeTitle">繰り返し</h2><button class="ix" id="scopeClose" aria-label="閉じる">×</button></div>
+      <p class="note">この記録は繰り返しから作られています。どう扱いますか？</p>
+      <div id="scopeBtns" class="scope-btns"></div>
+    </div>
+  </div>
+</div>
+
 <script>
 /* ============================================================
    RESO — スケルトン（骨組み）
@@ -476,15 +512,65 @@ const LEVEL_LABEL = {cat:'費目', sub:'区分', shop:'店', item:'品目'};
 
 let TX = [];   // クラウド(kakeibo_tx)から読み込む
 
-function tx(date, amount, cat, sub, shop, item, taxRate, active){
+function tx(date, amount, cat, sub, shop, item, taxRate, active, ruleId){
   return {id:'t'+Math.random().toString(36).slice(2,9), date, amount, cat, sub, shop, item, taxRate:taxRate||null,
-    active: active!==false};
+    active: active!==false, ruleId: ruleId||null};
 }
 
 /* ---- 収入（月別・複数行・支出とは別軸） ---- */
 let INCOME = [];   // {id, ym:'YYYY-MM', label, amount}
 function incomeInMonth(ym){ return INCOME.filter(x=>x.ym===ym); }
 function incomeTotal(ym){ return incomeInMonth(ym).reduce((s,x)=>s+(x.amount||0),0); }
+
+/* ---- 繰り返し（毎月の定期支出） ---- */
+let RULES = [];   // {id, amount, cat, sub, shop, item, taxRate, freq, startDate, endKind, endCount, endYm, active}
+const FUTURE_MONTHS = 12;   // forever ルールで先に用意しておく月数
+
+// startDate から n 回目（0始まり）の日付。毎月：同じ日、月末調整あり
+function ruleDateAt(rule, n){
+  const [y,m,d] = rule.startDate.split('-').map(Number);
+  const base = new Date(Date.UTC(y, m-1+n, 1));
+  const yy = base.getUTCFullYear(), mm = base.getUTCMonth();
+  const lastDay = new Date(Date.UTC(yy, mm+1, 0)).getUTCDate();  // その月の末日
+  const day = Math.min(d, lastDay);                              // 31日→末日に丸め
+  return yy + '-' + String(mm+1).padStart(2,'0') + '-' + String(day).padStart(2,'0');
+}
+// このルールが生成すべき全日付（endKind に従う）。ただし forever は「今日＋FUTURE_MONTHS」まで
+function ruleDates(rule){
+  const dates = [];
+  const horizon = jstDate(); // 今日
+  const [hy,hm] = horizon.split('-').map(Number);
+  const horizonYm = (new Date(Date.UTC(hy, hm-1+FUTURE_MONTHS, 1)));
+  const horizonCap = horizonYm.getUTCFullYear()+'-'+String(horizonYm.getUTCMonth()+1).padStart(2,'0');
+  for(let n=0; n<600; n++){   // 上限（安全弁）
+    if(rule.endKind==='count' && n>=rule.endCount) break;
+    const dt = ruleDateAt(rule, n);
+    if(rule.endKind==='until' && dt.slice(0,7) > rule.endYm) break;
+    if(rule.endKind==='forever' && dt.slice(0,7) > horizonCap) break;
+    dates.push(dt);
+  }
+  return dates;
+}
+// ルールに沿って未生成分の tx を作る（過去～今日=活性 / 未来=予定）。返り値: 追加した行の配列
+function buildRuleTx(rule){
+  const today = jstDate();
+  const existing = new Set(TX.filter(t=>t.ruleId===rule.id).map(t=>t.date));
+  const rows = [];
+  ruleDates(rule).forEach(dt=>{
+    if(existing.has(dt)) return;
+    rows.push({date:dt, amount:rule.amount, cat:rule.cat, sub:rule.sub||'（未設定）',
+      shop:rule.shop||'（未設定）', item:rule.item||'（品目なし）', taxRate:rule.taxRate,
+      active: dt<=today, ruleId:rule.id});
+  });
+  return rows;
+}
+// 全 active ルールについて、未来分の予定が足りていなければ補充（起動時）
+function ensureFuture(){
+  let allRows = [];
+  RULES.filter(r=>r.active).forEach(r=>{ allRows = allRows.concat(buildRuleTx(r)); });
+  if(!allRows.length) return Promise.resolve();
+  return insertTx(allRows);
+}
 
 /* ---- category tree (設定の커스터마이징 대상・kakeibo_settingsから読み込む) ---- */
 const DEFAULT_CAT_TREE = {
@@ -694,7 +780,8 @@ function emptyMonth(){
 function newItem(){ return {name:'', price:'', qty:1}; }
 // 記録画面の既定日付：今月を見ているなら今日、過去月なら その月の1日
 function defaultRecDate(){ return period===THIS_MONTH ? jstToday() : (period+'-01'); }
-let REC = {date:defaultRecDate(), taxMode:'in', cat:'', sub:'', shop:'', items:[newItem()]};
+let REC = {date:defaultRecDate(), taxMode:'in', cat:'', sub:'', shop:'', items:[newItem()],
+  repeat:false, endKind:'forever', endCount:'', endYm:''};
 
 function lineTotal(it){ const p=parseInt(it.price||'0',10)||0; const q=Math.max(1,parseInt(it.qty||'1',10)||1); return p*q; }
 function recSubtotal(){ return REC.items.reduce((s,it)=>s+lineTotal(it),0); }
@@ -764,8 +851,32 @@ function renderRec(){
   });
   html += REC.editId ? '' : '<button class="additem" id="additem">＋ 品目を追加</button>';
 
+  // 繰り返し（新規・単発のときだけ。編集/複製では出さない）
+  if(!REC.editId && !REC.editFrom){
+    html += '<div class="repeatbox'+(REC.repeat?' on':'')+'">'
+      + '<label class="repeattoggle"><span class="rt-txt">毎月くり返す</span>'
+      +   '<span class="switch'+(REC.repeat?' on':'')+'" id="repToggle"><span class="knob"></span></span></label>';
+    if(REC.repeat){
+      html += '<div class="rep-note">この内容を毎月 '+parseInt(REC.date.slice(8),10)+'日 に記録します（未来分は「予定」として先に作成）。</div>'
+        + '<div class="rep-ends">'
+        + '<button class="rep-end'+(REC.endKind==='forever'?' on':'')+'" data-end="forever">ずっと</button>'
+        + '<button class="rep-end'+(REC.endKind==='count'?' on':'')+'" data-end="count">回数で終了</button>'
+        + '<button class="rep-end'+(REC.endKind==='until'?' on':'')+'" data-end="until">年月で終了</button>'
+        + '</div>';
+      if(REC.endKind==='count'){
+        html += '<div class="rep-detail"><span>合計</span>'
+          + '<input class="tin rep-in num" id="endCount" inputmode="numeric" placeholder="例：36" value="'+esc(REC.endCount)+'" style="max-width:110px;">'
+          + '<span>回（分割払いなど）</span></div>';
+      } else if(REC.endKind==='until'){
+        html += '<div class="rep-detail"><span>この月まで</span>'
+          + '<input class="tin rep-in" id="endYm" type="month" value="'+esc(REC.endYm||REC.date.slice(0,7))+'" style="max-width:170px;"></div>';
+      }
+    }
+    html += '</div>';
+  }
+
   const ok = sub>0 && REC.cat;
-  const mainLabel = REC.editId ? '更新する' : (REC.editFrom ? '複製して記録する' : '記録する');
+  const mainLabel = REC.editId ? '更新する' : (REC.editFrom ? '複製して記録する' : (REC.repeat ? 'くり返しを登録する' : '記録する'));
   html += '<div class="recbar">'
     + '<button class="rec-cancel" id="reccancel">キャンセル</button>'
     + '<button class="rec-btn" id="recbtn" '+(ok?'':'disabled')+'>'+mainLabel+'</button>'
@@ -794,13 +905,17 @@ function renderRec(){
   });
   el.querySelectorAll('.ir-del').forEach(b=> b.onclick=()=>{ REC.items.splice(+b.dataset.idx,1); renderRec(); });
   const add=document.getElementById('additem'); if(add) add.onclick=()=>{ REC.items.push(newItem()); renderRec(); };
+  const rep=document.getElementById('repToggle'); if(rep) rep.onclick=()=>{ REC.repeat=!REC.repeat; renderRec(); };
+  el.querySelectorAll('[data-end]').forEach(b=> b.onclick=()=>{ REC.endKind=b.dataset.end; renderRec(); });
+  const ec=document.getElementById('endCount'); if(ec) ec.oninput=e=>{ REC.endCount=e.target.value.replace(/[^0-9]/g,''); };
+  const ey=document.getElementById('endYm'); if(ey) ey.onchange=e=>{ REC.endYm=e.target.value; };
   const rb=document.getElementById('recbtn'); if(rb) rb.onclick=saveRec;
   const rc=document.getElementById('reccancel'); if(rc) rc.onclick=cancelRec;
 }
 
 // 記録のキャンセル：フォームを初期化して解像へ戻る
 function cancelRec(){
-  REC = {date:defaultRecDate(), taxMode:'in', cat:'', sub:'', shop:'', items:[newItem()]};
+  REC = {date:defaultRecDate(), taxMode:'in', cat:'', sub:'', shop:'', items:[newItem()], repeat:false, endKind:'forever', endCount:'', endYm:''};
   go('lens');
 }
 
@@ -832,12 +947,45 @@ function saveRec(){
     const it = REC.items[0];
     const lt = lineTotal(it); if(lt<=0) return;
     const amount = REC.taxMode==='out'?Math.round(lt*1.1):lt;
+    // 「これ以降すべて」→ ルール内容を更新（この回以降の予定に反映）
+    if(REC.ruleScope && REC.ruleScope.ruleId){
+      const rid = REC.ruleScope.ruleId, fromDate = REC.ruleScope.fromDate;
+      const patch = {amount, cat:REC.cat, sub:REC.sub||'（未設定）', shop:REC.shop||'（未設定）',
+        item:it.name||'（品目なし）', taxRate:rate, _fromDate:fromDate};
+      period = d.slice(0,7);
+      REC = {date:defaultRecDate(), taxMode:'in', cat:'', sub:'', shop:'', items:[newItem()], repeat:false, endKind:'forever', endCount:'', endYm:''};
+      updateRuleContent(rid, patch).then(()=>showToast('これ以降の繰り返しを更新しました'));
+      updatePeriodUI(); path=[]; go('lens');
+      return;
+    }
     const patch = {date:d, amount, cat:REC.cat, sub:REC.sub||'（未設定）',
       shop:REC.shop||'（未設定）', item:it.name||'（品目なし）', taxRate:rate, active:act};
     const id = REC.editId;
     period = d.slice(0,7);
-    REC = {date:defaultRecDate(), taxMode:'in', cat:'', sub:'', shop:'', items:[newItem()]};
+    REC = {date:defaultRecDate(), taxMode:'in', cat:'', sub:'', shop:'', items:[newItem()], repeat:false, endKind:'forever', endCount:'', endYm:''};
     updateTx(id, patch).then(()=>showToast((isFuture?'予定を保存しました　':'更新しました　')+yen(amount)));
+    updatePeriodUI(); path=[]; go('lens');
+    return;
+  }
+
+  // ---- 繰り返し：ルールを作成して予定を生成 ----
+  if(REC.repeat){
+    // 繰り返しは代表1品目で1ルール（定期支出は単一項目が基本）
+    const it = REC.items.find(x=>lineTotal(x)>0) || REC.items[0];
+    const amount = REC.taxMode==='out'?Math.round(lineTotal(it)*1.1):lineTotal(it);
+    if(amount<=0) return;
+    // 終了条件のバリデーション
+    if(REC.endKind==='count' && !(parseInt(REC.endCount,10)>0)){ showToast('回数を入力してください'); return; }
+    if(REC.endKind==='until' && !REC.endYm){ showToast('終了年月を選んでください'); return; }
+    const rule = {
+      amount, cat:REC.cat, sub:REC.sub||'（未設定）', shop:REC.shop||'（未設定）',
+      item:it.name||'（品目なし）', taxRate:rate, freq:'monthly', startDate:d,
+      endKind:REC.endKind, endCount:REC.endKind==='count'?parseInt(REC.endCount,10):null,
+      endYm:REC.endKind==='until'?REC.endYm:null, active:true
+    };
+    period = d.slice(0,7);
+    REC = {date:defaultRecDate(), taxMode:'in', cat:'', sub:'', shop:'', items:[newItem()], repeat:false, endKind:'forever', endCount:'', endYm:''};
+    createRule(rule).then(()=>showToast('くり返しを登録しました　'+yen(amount)+'/月'));
     updatePeriodUI(); path=[]; go('lens');
     return;
   }
@@ -855,7 +1003,7 @@ function saveRec(){
 
   // 記録した月へ移動して結果を見せる
   period = d.slice(0,7);
-  REC = {date:defaultRecDate(), taxMode:'in', cat:'', sub:'', shop:'', items:[newItem()]};
+  REC = {date:defaultRecDate(), taxMode:'in', cat:'', sub:'', shop:'', items:[newItem()], repeat:false, endKind:'forever', endCount:'', endYm:''};
 
   insertTx(rows).then(()=>{
     showToast((isFuture?'予定として保存　':'記録しました　')+yen(total)+(n>1?'（'+n+'品目）':''));
@@ -866,12 +1014,54 @@ function saveRec(){
 /* 履歴からの編集：既存の行を「編集モード」で開く（IDそのまま・上書き保存） */
 function editTx(id){
   const t = TX.find(x=>x.id===id); if(!t) return;
+  // 繰り返しから生成された記録 → 適用範囲を尋ねる
+  if(t.ruleId && RULES.find(r=>r.id===t.ruleId && r.active)){
+    openRepeatScope(t, 'edit');
+    return;
+  }
+  openEditForm(t, null);
+}
+// scope: null=単発として1件のみ / {ruleId,fromDate}=これ以降すべて
+function openEditForm(t, scope){
   REC = {date:t.date, taxMode: t.taxRate?'out':'in', cat:t.cat, sub:t.sub==='（未設定）'?'':t.sub,
     shop:t.shop==='（未設定）'?'':t.shop,
     items:[{name:t.item==='（品目なし）'?'':t.item,
       price:String(t.taxRate?Math.round(t.amount/1.1):t.amount), qty:1}],
-    editId:id};
+    editId:id_of(t), repeat:false, endKind:'forever', endCount:'', endYm:'',
+    ruleScope: scope};
   go('rec');
+}
+function id_of(t){ return t.id; }
+
+/* 繰り返し記録の編集/削除で「範囲」を尋ねるシート */
+function openRepeatScope(t, mode){
+  const rule = RULES.find(r=>r.id===t.ruleId);
+  const modal = document.getElementById('scopeModal');
+  const title = mode==='edit' ? 'この繰り返しを編集' : 'この繰り返しを削除';
+  document.getElementById('scopeTitle').textContent = title;
+  const box = document.getElementById('scopeBtns');
+  // 3択（削除のときは「これ以降」を「以降の予定を削除」に読み替え）
+  box.innerHTML =
+    '<button class="scope-b" data-s="one">この記録だけ<span>'+(mode==='edit'?'この1件だけ直す':'この1件だけ消す')+'</span></button>'
+    + (mode==='edit'
+        ? '<button class="scope-b" data-s="after">これ以降すべて<span>この回から先の予定に反映（過去は残す）</span></button>'
+        : '')
+    + '<button class="scope-b danger" data-s="stop">繰り返しをやめる<span>'+(mode==='edit'?'今後の自動作成を停止（過去は残す）':'以降の予定を削除し停止（過去は残す）')+'</span></button>';
+  modal.hidden=false;
+  box.querySelectorAll('.scope-b').forEach(b=> b.onclick=()=>{
+    modal.hidden=true;
+    const s=b.dataset.s;
+    if(mode==='edit'){
+      if(s==='one'){ openEditForm(t, null); }                    // 単発として1件のみ
+      else if(s==='after'){ openEditForm(t, {ruleId:t.ruleId, fromDate:t.date}); }
+      else if(s==='stop'){ if(confirm('繰り返しをやめますか？（過去・今日までの記録は残ります）')) stopRule(t.ruleId).then(()=>{ if(TAB==='hist') renderHist(); if(TAB==='lens') renderLens(); }); }
+    } else { // delete
+      if(s==='one'){ deleteTx(t.id).then(()=>renderHist()); }
+      else if(s==='stop'){ stopRule(t.ruleId).then(()=>{ deleteTx(t.id).then(()=>renderHist()); }); }
+    }
+  });
+  document.getElementById('scopeClose').onclick=()=>{ modal.hidden=true; };
+  modal.onclick=e=>{ if(e.target.id==='scopeModal') modal.hidden=true; };
 }
 
 /* ============================================================
@@ -924,7 +1114,7 @@ function duplicateTx(id){
     shop:t.shop==='（未設定）'?'':t.shop,
     items:[{name:t.item==='（品目なし）'?'':t.item,
       price:String(t.taxRate?Math.round(t.amount/1.1):t.amount), qty:1}],
-    editFrom:id};
+    editFrom:id, repeat:false, endKind:'forever', endCount:'', endYm:''};
   go('rec');
   showToast('複製しました。内容を確認して記録');
 }
@@ -969,6 +1159,8 @@ function renderHist(){
   el.querySelectorAll('.editbtn').forEach(b=> b.onclick=()=>editTx(b.dataset.id));
   el.querySelectorAll('.dupbtn').forEach(b=> b.onclick=()=>duplicateTx(b.dataset.id));
   el.querySelectorAll('.delbtn').forEach(b=> b.onclick=()=>{
+    const t = TX.find(x=>x.id===b.dataset.id); if(!t) return;
+    if(t.ruleId && RULES.find(r=>r.id===t.ruleId && r.active)){ openRepeatScope(t, 'delete'); return; }
     if(confirm('この記録を削除しますか？')) deleteTx(b.dataset.id).then(()=>renderHist());
   });
 }
@@ -1167,12 +1359,68 @@ function setSync(s){
 /* DB行 → アプリのtx形式 */
 function rowToTx(r){
   return {id:r.id, date:r.date, amount:r.amount, cat:r.cat, sub:r.sub, shop:r.shop, item:r.item, taxRate:r.tax_rate,
-    active: r.active!==false};   // 既存行(null)は活性扱い
+    active: r.active!==false, ruleId:r.rule_id||null};   // 既存行(null)は活性扱い
 }
 /* アプリのtx形式 → DB行（user_id付与） */
 function txToRow(t){
   return {user_id:SESSION.user.id, date:t.date, amount:t.amount, cat:t.cat,
-    sub:t.sub, shop:t.shop, item:t.item, tax_rate:t.taxRate, active: t.active!==false};
+    sub:t.sub, shop:t.shop, item:t.item, tax_rate:t.taxRate, active: t.active!==false, rule_id:t.ruleId||null};
+}
+function rowToRule(r){
+  return {id:r.id, amount:r.amount, cat:r.cat, sub:r.sub, shop:r.shop, item:r.item, taxRate:r.tax_rate,
+    freq:r.freq, startDate:r.start_date, endKind:r.end_kind, endCount:r.end_count, endYm:r.end_ym, active:r.active!==false};
+}
+function ruleToRow(rule){
+  return {user_id:SESSION.user.id, amount:rule.amount, cat:rule.cat, sub:rule.sub, shop:rule.shop, item:rule.item,
+    tax_rate:rule.taxRate, freq:rule.freq||'monthly', start_date:rule.startDate,
+    end_kind:rule.endKind, end_count:rule.endCount, end_ym:rule.endYm, active:rule.active!==false};
+}
+
+/* ルールを作成 → DBに保存 → そのルールの予定/記録を生成 */
+function createRule(rule){
+  if(!sb||!SESSION){ // オフライン
+    rule.id='r'+Math.random().toString(36).slice(2,9); RULES.push(rule);
+    return insertTx(buildRuleTx(rule));
+  }
+  setSync('save');
+  return sb.from('kakeibo_rule').insert(ruleToRow(rule)).select().single()
+    .then(r=>{ if(r.error) throw r.error;
+      const saved = rowToRule(r.data); RULES.push(saved);
+      return insertTx(buildRuleTx(saved));
+    })
+    .then(()=>setSync('ok'))
+    .catch(e=>{ console.error(e); setSync('err'); });
+}
+
+/* ルール内容を更新（これ以降すべて）。未活性の予定分に新内容を反映 */
+function updateRuleContent(ruleId, patch){
+  const rule = RULES.find(r=>r.id===ruleId); if(!rule) return Promise.resolve();
+  Object.assign(rule, patch);                       // ローカル反映
+  // まだ活性化していない予定分を新内容へ更新
+  const fromDate = patch._fromDate || jstToday();
+  const targets = TX.filter(t=>t.ruleId===ruleId && t.active===false && t.date>=fromDate);
+  targets.forEach(t=>{ t.amount=rule.amount; t.cat=rule.cat; t.sub=rule.sub; t.shop=rule.shop; t.item=rule.item; t.taxRate=rule.taxRate; });
+  if(!sb||!SESSION) return Promise.resolve();
+  setSync('save');
+  const p1 = sb.from('kakeibo_rule').update({amount:rule.amount, cat:rule.cat, sub:rule.sub, shop:rule.shop, item:rule.item, tax_rate:rule.taxRate}).eq('id',ruleId).eq('user_id',SESSION.user.id);
+  const ids = targets.map(t=>t.id);
+  const p2 = ids.length ? sb.from('kakeibo_tx').update({amount:rule.amount, cat:rule.cat, sub:rule.sub, shop:rule.shop, item:rule.item, tax_rate:rule.taxRate}).in('id',ids).eq('user_id',SESSION.user.id) : Promise.resolve({});
+  return Promise.all([p1,p2]).then(rs=>{ if(rs.some(x=>x&&x.error)) setSync('err'); else setSync('ok'); })
+    .catch(e=>{ console.error(e); setSync('err'); });
+}
+
+/* 繰り返しをやめる：ルール無効化 + 未活性の予定分を削除。過去・活性分は残す */
+function stopRule(ruleId){
+  const rule = RULES.find(r=>r.id===ruleId); if(rule) rule.active=false;
+  const doomed = TX.filter(t=>t.ruleId===ruleId && t.active===false);
+  const ids = doomed.map(t=>t.id);
+  TX = TX.filter(t=>!(t.ruleId===ruleId && t.active===false));  // ローカルから予定を除去
+  if(!sb||!SESSION) return Promise.resolve();
+  setSync('save');
+  const p1 = sb.from('kakeibo_rule').update({active:false}).eq('id',ruleId).eq('user_id',SESSION.user.id);
+  const p2 = ids.length ? sb.from('kakeibo_tx').delete().in('id',ids).eq('user_id',SESSION.user.id) : Promise.resolve({});
+  return Promise.all([p1,p2]).then(rs=>{ if(rs.some(x=>x&&x.error)) setSync('err'); else setSync('ok'); })
+    .catch(e=>{ console.error(e); setSync('err'); });
 }
 
 function loadAll(){
@@ -1185,7 +1433,9 @@ function loadAll(){
       else { saveSettings(); } });
   const p3 = sb.from('kakeibo_income').select('*').eq('user_id',SESSION.user.id)
     .then(r=>{ if(r.error) throw r.error; INCOME = (r.data||[]).map(x=>({id:x.id, ym:x.ym, label:x.label, amount:x.amount})); });
-  return Promise.all([p1,p2,p3]).then(()=>{ promoteDue(); setSync('ok'); }).catch(e=>{ console.error(e); setSync('err'); });
+  const p4 = sb.from('kakeibo_rule').select('*').eq('user_id',SESSION.user.id)
+    .then(r=>{ if(r.error) throw r.error; RULES = (r.data||[]).map(rowToRule); });
+  return Promise.all([p1,p2,p3,p4]).then(()=>{ promoteDue(); return ensureFuture(); }).then(()=>setSync('ok')).catch(e=>{ console.error(e); setSync('err'); });
 }
 
 /* 日付が到達した予定(active=false)を活性化する。0時判定の代わりに起動/月移動時に実行 */
@@ -1203,7 +1453,7 @@ function promoteDue(){
 
 function insertTx(rows){
   if(!sb||!SESSION){ // オフライン簡易フォールバック（ローカルのみ）
-    rows.forEach(r=>TX.push(tx(r.date,r.amount,r.cat,r.sub,r.shop,r.item,r.taxRate,r.active))); return Promise.resolve();
+    rows.forEach(r=>TX.push(tx(r.date,r.amount,r.cat,r.sub,r.shop,r.item,r.taxRate,r.active,r.ruleId))); return Promise.resolve();
   }
   setSync('save');
   return sb.from('kakeibo_tx').insert(rows.map(txToRow)).select()
