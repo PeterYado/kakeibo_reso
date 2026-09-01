@@ -524,9 +524,9 @@ const LEVEL_LABEL = {cat:'費目', sub:'区分', shop:'店', item:'品目'};
 
 let TX = [];   // クラウド(kakeibo_tx)から読み込む
 
-function tx(date, amount, cat, sub, shop, item, taxRate, active, ruleId){
+function tx(date, amount, cat, sub, shop, item, taxRate, active, ruleId, unit, qty){
   return {id:'t'+Math.random().toString(36).slice(2,9), date, amount, cat, sub, shop, item, taxRate:taxRate||null,
-    active: active!==false, ruleId: ruleId||null};
+    active: active!==false, ruleId: ruleId||null, unit: unit!=null?unit:amount, qty: qty!=null?qty:1};
 }
 
 /* ---- 収入（月別・複数行・支出とは別軸） ---- */
@@ -572,7 +572,7 @@ function buildRuleTx(rule){
     if(existing.has(dt)) return;
     rows.push({date:dt, amount:rule.amount, cat:rule.cat, sub:rule.sub||'（未設定）',
       shop:rule.shop||'（未設定）', item:rule.item||'（品目なし）', taxRate:rule.taxRate,
-      active: dt<=today, ruleId:rule.id});
+      active: dt<=today, ruleId:rule.id, unit: rule.unit!=null?rule.unit:rule.amount, qty: rule.qty!=null?rule.qty:1});
   });
   return rows;
 }
@@ -1037,12 +1037,15 @@ function saveRec(){
   if(REC.editId){
     const it = REC.items[0];
     const lt = lineTotal(it); if(lt<=0) return;
+    const q = Math.max(1, parseInt(it.qty||'1',10)||1);
+    const unitIn = parseInt(it.price||'0',10)||0;
     const amount = REC.taxMode==='out'?Math.round(lt*1.1):lt;
+    const unit = REC.taxMode==='out'?Math.round(unitIn*1.1):unitIn;
     // 「これ以降すべて」→ ルール内容を更新（この回以降の予定に反映）
     if(REC.ruleScope && REC.ruleScope.ruleId){
       const rid = REC.ruleScope.ruleId, fromDate = REC.ruleScope.fromDate;
       const patch = {amount, cat:REC.cat, sub:REC.sub||'（未設定）', shop:REC.shop||'（未設定）',
-        item:it.name||'（品目なし）', taxRate:rate, _fromDate:fromDate};
+        item:it.name||'（品目なし）', taxRate:rate, unit, qty:q, _fromDate:fromDate};
       period = d.slice(0,7);
       REC = {date:defaultRecDate(), taxMode:'in', cat:'', sub:'', shop:'', items:[newItem()], repeat:false, endKind:'forever', endCount:'', endYm:''};
       updateRuleContent(rid, patch).then(()=>showToast('これ以降の繰り返しを更新しました'));
@@ -1050,7 +1053,7 @@ function saveRec(){
       return;
     }
     const patch = {date:d, amount, cat:REC.cat, sub:REC.sub||'（未設定）',
-      shop:REC.shop||'（未設定）', item:it.name||'（品目なし）', taxRate:rate, active:act};
+      shop:REC.shop||'（未設定）', item:it.name||'（品目なし）', taxRate:rate, active:act, unit, qty:q};
     const id = REC.editId;
     period = d.slice(0,7);
     REC = {date:defaultRecDate(), taxMode:'in', cat:'', sub:'', shop:'', items:[newItem()], repeat:false, endKind:'forever', endCount:'', endYm:''};
@@ -1063,7 +1066,10 @@ function saveRec(){
   if(REC.repeat){
     // 繰り返しは代表1品目で1ルール（定期支出は単一項目が基本）
     const it = REC.items.find(x=>lineTotal(x)>0) || REC.items[0];
+    const q = Math.max(1, parseInt(it.qty||'1',10)||1);
+    const unitIn = parseInt(it.price||'0',10)||0;
     const amount = REC.taxMode==='out'?Math.round(lineTotal(it)*1.1):lineTotal(it);
+    const unit = REC.taxMode==='out'?Math.round(unitIn*1.1):unitIn;
     if(amount<=0) return;
     // 終了条件のバリデーション
     if(REC.endKind==='count' && !(parseInt(REC.endCount,10)>0)){ showToast('回数を入力してください'); return; }
@@ -1072,7 +1078,7 @@ function saveRec(){
       amount, cat:REC.cat, sub:REC.sub||'（未設定）', shop:REC.shop||'（未設定）',
       item:it.name||'（品目なし）', taxRate:rate, freq:'monthly', startDate:d,
       endKind:REC.endKind, endCount:REC.endKind==='count'?parseInt(REC.endCount,10):null,
-      endYm:REC.endKind==='until'?REC.endYm:null, active:true
+      endYm:REC.endKind==='until'?REC.endYm:null, active:true, unit, qty:q
     };
     period = d.slice(0,7);
     REC = {date:defaultRecDate(), taxMode:'in', cat:'', sub:'', shop:'', items:[newItem()], repeat:false, endKind:'forever', endCount:'', endYm:''};
@@ -1085,9 +1091,12 @@ function saveRec(){
   const rows = [];
   REC.items.forEach(it=>{
     const lt=lineTotal(it); if(lt<=0) return;
-    const amount = REC.taxMode==='out'?Math.round(lt*1.1):lt;   // 税抜入力なら税込へ
+    const q = Math.max(1, parseInt(it.qty||'1',10)||1);
+    const unitIn = parseInt(it.price||'0',10)||0;                    // 入力された単価（税抜/税込は toggle 準拠）
+    const amount = REC.taxMode==='out'?Math.round(lt*1.1):lt;        // 行合計（税込）
+    const unit = REC.taxMode==='out'?Math.round(unitIn*1.1):unitIn;  // 保存する単価も税込ベースに揃える
     rows.push({date:d, amount, cat:REC.cat, sub:REC.sub||'（未設定）',
-      shop:REC.shop||'（未設定）', item:it.name||'（品目なし）', taxRate:rate, active:act});
+      shop:REC.shop||'（未設定）', item:it.name||'（品目なし）', taxRate:rate, active:act, unit, qty:q});
   });
   if(!rows.length) return;
   const total=recTotalIncl(), n=rows.length;
@@ -1114,10 +1123,14 @@ function editTx(id){
 }
 // scope: null=単発として1件のみ / {ruleId,fromDate}=これ以降すべて
 function openEditForm(t, scope){
-  REC = {date:t.date, taxMode: t.taxRate?'out':'in', cat:t.cat, sub:t.sub==='（未設定）'?'':t.sub,
+  const isOut = !!t.taxRate;
+  // 保存済みの単価は税込ベース。税抜編集なら税抜に戻して表示（無ければ amount/qty から復元）
+  const q = t.qty!=null && t.qty>0 ? t.qty : 1;
+  let unit = t.unit!=null ? t.unit : Math.round(t.amount/q);
+  const priceShown = isOut ? Math.round(unit/1.1) : unit;
+  REC = {date:t.date, taxMode: isOut?'out':'in', cat:t.cat, sub:t.sub==='（未設定）'?'':t.sub,
     shop:t.shop==='（未設定）'?'':t.shop,
-    items:[{name:t.item==='（品目なし）'?'':t.item,
-      price:String(t.taxRate?Math.round(t.amount/1.1):t.amount), qty:1}],
+    items:[{name:t.item==='（品目なし）'?'':t.item, price:String(priceShown), qty:q}],
     editId:id_of(t), repeat:false, endKind:'forever', endCount:'', endYm:'',
     ruleScope: scope};
   go('rec');
@@ -1450,21 +1463,25 @@ function setSync(s){
 /* DB行 → アプリのtx形式 */
 function rowToTx(r){
   return {id:r.id, date:r.date, amount:r.amount, cat:r.cat, sub:r.sub, shop:r.shop, item:r.item, taxRate:r.tax_rate,
-    active: r.active!==false, ruleId:r.rule_id||null};   // 既存行(null)は活性扱い
+    active: r.active!==false, ruleId:r.rule_id||null,
+    unit: r.unit_price!=null ? r.unit_price : r.amount, qty: r.qty!=null ? r.qty : 1};   // 既存行はqty=1/unit=amount
 }
 /* アプリのtx形式 → DB行（user_id付与） */
 function txToRow(t){
   return {user_id:SESSION.user.id, date:t.date, amount:t.amount, cat:t.cat,
-    sub:t.sub, shop:t.shop, item:t.item, tax_rate:t.taxRate, active: t.active!==false, rule_id:t.ruleId||null};
+    sub:t.sub, shop:t.shop, item:t.item, tax_rate:t.taxRate, active: t.active!==false, rule_id:t.ruleId||null,
+    unit_price: t.unit!=null ? t.unit : t.amount, qty: t.qty!=null ? t.qty : 1};
 }
 function rowToRule(r){
   return {id:r.id, amount:r.amount, cat:r.cat, sub:r.sub, shop:r.shop, item:r.item, taxRate:r.tax_rate,
-    freq:r.freq, startDate:r.start_date, endKind:r.end_kind, endCount:r.end_count, endYm:r.end_ym, active:r.active!==false};
+    freq:r.freq, startDate:r.start_date, endKind:r.end_kind, endCount:r.end_count, endYm:r.end_ym, active:r.active!==false,
+    unit: r.unit_price!=null ? r.unit_price : r.amount, qty: r.qty!=null ? r.qty : 1};
 }
 function ruleToRow(rule){
   return {user_id:SESSION.user.id, amount:rule.amount, cat:rule.cat, sub:rule.sub, shop:rule.shop, item:rule.item,
     tax_rate:rule.taxRate, freq:rule.freq||'monthly', start_date:rule.startDate,
-    end_kind:rule.endKind, end_count:rule.endCount, end_ym:rule.endYm, active:rule.active!==false};
+    end_kind:rule.endKind, end_count:rule.endCount, end_ym:rule.endYm, active:rule.active!==false,
+    unit_price: rule.unit!=null ? rule.unit : rule.amount, qty: rule.qty!=null ? rule.qty : 1};
 }
 
 /* ルールを作成 → DBに保存 → そのルールの予定/記録を生成 */
@@ -1486,16 +1503,16 @@ function createRule(rule){
 /* ルール内容を更新（これ以降すべて）。未活性の予定分に新内容を反映 */
 function updateRuleContent(ruleId, patch){
   const rule = RULES.find(r=>r.id===ruleId); if(!rule) return Promise.resolve();
-  Object.assign(rule, patch);                       // ローカル反映
+  Object.assign(rule, patch);                       // ローカル反映（unit/qtyも含む）
   // まだ活性化していない予定分を新内容へ更新
   const fromDate = patch._fromDate || jstToday();
   const targets = TX.filter(t=>t.ruleId===ruleId && t.active===false && t.date>=fromDate);
-  targets.forEach(t=>{ t.amount=rule.amount; t.cat=rule.cat; t.sub=rule.sub; t.shop=rule.shop; t.item=rule.item; t.taxRate=rule.taxRate; });
+  targets.forEach(t=>{ t.amount=rule.amount; t.cat=rule.cat; t.sub=rule.sub; t.shop=rule.shop; t.item=rule.item; t.taxRate=rule.taxRate; t.unit=rule.unit; t.qty=rule.qty; });
   if(!sb||!SESSION) return Promise.resolve();
   setSync('save');
-  const p1 = sb.from('kakeibo_rule').update({amount:rule.amount, cat:rule.cat, sub:rule.sub, shop:rule.shop, item:rule.item, tax_rate:rule.taxRate}).eq('id',ruleId).eq('user_id',SESSION.user.id);
+  const p1 = sb.from('kakeibo_rule').update({amount:rule.amount, cat:rule.cat, sub:rule.sub, shop:rule.shop, item:rule.item, tax_rate:rule.taxRate, unit_price:rule.unit, qty:rule.qty}).eq('id',ruleId).eq('user_id',SESSION.user.id);
   const ids = targets.map(t=>t.id);
-  const p2 = ids.length ? sb.from('kakeibo_tx').update({amount:rule.amount, cat:rule.cat, sub:rule.sub, shop:rule.shop, item:rule.item, tax_rate:rule.taxRate}).in('id',ids).eq('user_id',SESSION.user.id) : Promise.resolve({});
+  const p2 = ids.length ? sb.from('kakeibo_tx').update({amount:rule.amount, cat:rule.cat, sub:rule.sub, shop:rule.shop, item:rule.item, tax_rate:rule.taxRate, unit_price:rule.unit, qty:rule.qty}).in('id',ids).eq('user_id',SESSION.user.id) : Promise.resolve({});
   return Promise.all([p1,p2]).then(rs=>{ if(rs.some(x=>x&&x.error)) setSync('err'); else setSync('ok'); })
     .catch(e=>{ console.error(e); setSync('err'); });
 }
@@ -1544,7 +1561,7 @@ function promoteDue(){
 
 function insertTx(rows){
   if(!sb||!SESSION){ // オフライン簡易フォールバック（ローカルのみ）
-    rows.forEach(r=>TX.push(tx(r.date,r.amount,r.cat,r.sub,r.shop,r.item,r.taxRate,r.active,r.ruleId))); return Promise.resolve();
+    rows.forEach(r=>TX.push(tx(r.date,r.amount,r.cat,r.sub,r.shop,r.item,r.taxRate,r.active,r.ruleId,r.unit,r.qty))); return Promise.resolve();
   }
   setSync('save');
   return sb.from('kakeibo_tx').insert(rows.map(txToRow)).select()
@@ -1571,6 +1588,8 @@ function updateTx(id, patch){
   const row={date:patch.date, amount:patch.amount, cat:patch.cat, sub:patch.sub,
     shop:patch.shop, item:patch.item, tax_rate:patch.taxRate};
   if(patch.active!==undefined) row.active=patch.active;
+  if(patch.unit!==undefined) row.unit_price=patch.unit;
+  if(patch.qty!==undefined) row.qty=patch.qty;
   return sb.from('kakeibo_tx').update(row).eq('id',id).eq('user_id',SESSION.user.id)
     .then(r=>{ if(r.error) throw r.error; applyLocal(); setSync('ok');
       if(TAB==='lens') renderLens(); if(TAB==='hist') renderHist(); })
