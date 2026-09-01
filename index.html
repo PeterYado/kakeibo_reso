@@ -251,6 +251,18 @@
     box-shadow:0 1px 0 rgba(23,33,43,.02);}
   .ir-top{display:flex; align-items:center; gap:8px;}
   .ir-name{margin-top:0; flex:1 1 auto; height:42px;}
+
+  /* 自動補完ドロップダウン */
+  .acwrap{position:relative;}
+  .acdrop{position:absolute; top:calc(100% + 4px); left:0; right:0; z-index:30;
+    background:var(--surface); border:1px solid var(--line2); border-radius:11px; overflow-y:auto; max-height:216px;
+    box-shadow:0 12px 30px rgba(23,33,43,.14); padding:4px;}
+  .acdrop[hidden]{display:none;}
+  .acitem{display:flex; align-items:center; justify-content:space-between; gap:10px; width:100%; text-align:left;
+    background:none; border:0; border-radius:8px; padding:10px 11px; font-size:14px; color:var(--ink);}
+  .acitem:hover{background:var(--surface2);}
+  .acitem .acnm{white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .acitem .acpr{color:var(--ink2); font-size:13px; flex:0 0 auto;}
   .ir-del{flex:0 0 auto; width:34px; height:34px; border:1px solid var(--line); border-radius:9px; background:var(--surface);
     color:var(--ink3); font-size:13px;}
   .ir-del:hover{border-color:var(--crimson); color:var(--crimson);}
@@ -787,6 +799,43 @@ function lineTotal(it){ const p=parseInt(it.price||'0',10)||0; const q=Math.max(
 function recSubtotal(){ return REC.items.reduce((s,it)=>s+lineTotal(it),0); }
 function recTotalIncl(){ const sub=recSubtotal(); return REC.taxMode==='out'?Math.round(sub*1.1):sub; }
 
+/* ---- 自動補完：過去の記録(TX)から候補を作る（カテゴリ完全一致・最近入力順） ---- */
+// TXを新しい順にした配列（date→なければ後ろ）。id生成順は担保できないのでdate降順で近似
+function txRecent(){ return TX.slice().sort((a,b)=>b.date.localeCompare(a.date)); }
+// 店候補：費目・区分が一致する過去の店。最近入力順・重複除去。filterで絞り込み
+function shopSuggests(filter){
+  if(!REC.cat) return [];
+  const f=(filter||'').trim();
+  const seen=new Set(), out=[];
+  txRecent().forEach(t=>{
+    if(t.cat!==REC.cat) return;
+    if((REC.sub||'（未設定）')!==(t.sub||'（未設定）')) return;
+    const s=t.shop; if(!s||s==='（未設定）') return;
+    if(f && s.indexOf(f)<0) return;
+    if(seen.has(s)) return; seen.add(s); out.push(s);
+  });
+  return out;
+}
+// 品目候補：費目・区分・店が一致する過去の品目（＋最近の単価）。最近入力順・重複除去
+function itemSuggests(filter){
+  if(!REC.cat) return [];
+  const f=(filter||'').trim();
+  const shop=REC.shop||'';
+  const seen=new Set(), out=[];
+  txRecent().forEach(t=>{
+    if(t.cat!==REC.cat) return;
+    if((REC.sub||'（未設定）')!==(t.sub||'（未設定）')) return;
+    if(shop && (t.shop||'')!==shop) return;          // 店が決まっていれば店も一致
+    const nm=t.item; if(!nm||nm==='（品目なし）') return;
+    if(f && nm.indexOf(f)<0) return;
+    if(seen.has(nm)) return; seen.add(nm);
+    // 単価：税抜入力だった行は税抜に戻して提案（入力欄は単価＝税抜/税込を toggle で解釈）
+    const unit = t.taxRate ? Math.round(t.amount/(1+t.taxRate)) : t.amount;
+    out.push({name:nm, price: shop ? unit : null});   // 店未指定なら価格は出さない
+  });
+  return out;
+}
+
 function renderRec(){
   const el = document.getElementById('v-rec');
   const cats = Object.keys(CAT_TREE);
@@ -826,16 +875,22 @@ function renderRec(){
   }
 
   // 店（共有）
-  html += '<div class="seclab">店 <span class="stub">自由入力・後で自動補完</span></div>'
-    + '<input class="tin" id="shopin" placeholder="例：マツモトキヨシ" value="'+esc(REC.shop)+'">';
+  html += '<div class="seclab">店 <span class="stub">タップで履歴・入力で絞り込み</span></div>'
+    + '<div class="acwrap">'
+    + '<input class="tin" id="shopin" placeholder="例：マツモトキヨシ" value="'+esc(REC.shop)+'" autocomplete="off">'
+    + '<div class="acdrop" id="shopDrop" hidden></div>'
+    + '</div>';
 
   // 品目（複数行：単価 × 数量）
-  html += '<div class="seclab">品目 <span class="stub">単価 × 数量・後で自動補完</span></div>';
+  html += '<div class="seclab">品目 <span class="stub">タップで履歴・単価も自動</span></div>';
   REC.items.forEach((it,idx)=>{
     const lt = lineTotal(it);
     html += '<div class="itemrow" data-idx="'+idx+'">'
       + '<div class="ir-top">'
-      +   '<input class="tin ir-name" data-idx="'+idx+'" placeholder="品目（例：おしりふき）" value="'+esc(it.name)+'">'
+      +   '<div class="acwrap" style="flex:1 1 auto;">'
+      +     '<input class="tin ir-name" data-idx="'+idx+'" placeholder="品目（例：おしりふき）" value="'+esc(it.name)+'" autocomplete="off">'
+      +     '<div class="acdrop" id="itemDrop'+idx+'" hidden></div>'
+      +   '</div>'
       +   (REC.items.length>1 ? '<button class="ir-del" data-idx="'+idx+'" aria-label="この品目を削除">✕</button>' : '')
       + '</div>'
       + '<div class="ir-bot">'
@@ -890,10 +945,31 @@ function renderRec(){
   el.querySelectorAll('[data-sub]').forEach(b=> b.onclick = ()=>{ REC.sub=b.dataset.sub; renderRec(); });
   const datein=document.getElementById('datein'); if(datein) datein.onchange=e=>{ REC.date=e.target.value||jstToday(); renderRec(); };
   const todaybtn=document.getElementById('todaybtn'); if(todaybtn) todaybtn.onclick=()=>{ REC.date=jstToday(); renderRec(); };
-  const shopin=document.getElementById('shopin'); if(shopin) shopin.oninput=e=>REC.shop=e.target.value;
+  const shopin=document.getElementById('shopin');
+  if(shopin){
+    const drop=document.getElementById('shopDrop');
+    const fill=()=>{ renderAcDrop(drop, shopSuggests(shopin.value).map(s=>({label:s})), (choice)=>{
+      REC.shop=choice.label; shopin.value=choice.label; hideAc(drop);
+      // 店が決まると品目候補が変わるので、品目ドロップを閉じておく
+    }); };
+    shopin.oninput=e=>{ REC.shop=e.target.value; fill(); };
+    shopin.onfocus=fill;
+    shopin.onblur=()=>setTimeout(()=>hideAc(drop),150);  // タップ選択を拾うため遅延
+  }
 
   // 品目行：名前・単価はライブ更新だが再描画しない（フォーカス維持）。合計だけ更新
-  el.querySelectorAll('.ir-name').forEach(inp=> inp.oninput=e=>{ REC.items[+e.target.dataset.idx].name=e.target.value; });
+  el.querySelectorAll('.ir-name').forEach(inp=>{
+    const idx=+inp.dataset.idx; const drop=document.getElementById('itemDrop'+idx);
+    const fill=()=>{ renderAcDrop(drop, itemSuggests(inp.value).map(x=>({label:x.name, price:x.price})), (choice)=>{
+      REC.items[idx].name=choice.label; inp.value=choice.label;
+      if(choice.price!=null){ REC.items[idx].price=String(choice.price);
+        const pin=el.querySelector('.ir-in[data-idx="'+idx+'"]'); if(pin) pin.value=String(choice.price); }
+      hideAc(drop); updateRecTotals();
+    }); };
+    inp.oninput=e=>{ REC.items[idx].name=e.target.value; fill(); };
+    inp.onfocus=fill;
+    inp.onblur=()=>setTimeout(()=>hideAc(drop),150);
+  });
   el.querySelectorAll('.ir-in, .ir-qin').forEach(inp=> inp.oninput=e=>{
     const i=+e.target.dataset.idx, f=e.target.dataset.f;
     REC.items[i][f]=e.target.value.replace(/[^0-9]/g,'');
@@ -918,6 +994,21 @@ function cancelRec(){
   REC = {date:defaultRecDate(), taxMode:'in', cat:'', sub:'', shop:'', items:[newItem()], repeat:false, endKind:'forever', endCount:'', endYm:''};
   go('lens');
 }
+
+// 自動補完ドロップの描画。items:[{label, price?}]。onPick(choice)で選択
+function renderAcDrop(drop, items, onPick){
+  if(!drop) return;
+  if(!items.length){ hideAc(drop); return; }
+  drop.innerHTML = items.map((x,i)=>
+    '<button class="acitem" data-i="'+i+'"><span class="acnm">'+esc(x.label)+'</span>'
+    + (x.price!=null?'<span class="acpr num">'+yen(x.price)+'</span>':'')+'</button>').join('');
+  drop.hidden=false;
+  drop.querySelectorAll('.acitem').forEach(b=>{
+    // mousedown（blurより先に発火）で選択を確定
+    b.onmousedown=e=>{ e.preventDefault(); onPick(items[+b.dataset.i]); };
+  });
+}
+function hideAc(drop){ if(drop){ drop.hidden=true; drop.innerHTML=''; } }
 
 // 再描画せず合計表示だけ更新（入力中フォーカスを保つ）
 function updateRecTotals(){
