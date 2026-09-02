@@ -566,10 +566,10 @@ function ruleDates(rule){
 // ルールに沿って未生成分の tx を作る（過去～今日=活性 / 未来=予定）。返り値: 追加した行の配列
 function buildRuleTx(rule){
   const today = jstDate();
-  const existing = new Set(TX.filter(t=>t.ruleId===rule.id).map(t=>t.date));
+  const existing = new Set(TX.filter(t=>t.ruleId===rule.id).map(t=>t.date.slice(0,7)));  // 年月で重複判定
   const rows = [];
   ruleDates(rule).forEach(dt=>{
-    if(existing.has(dt)) return;
+    if(existing.has(dt.slice(0,7))) return;   // その月に既にこのルールの記録があればスキップ
     rows.push({date:dt, amount:rule.amount, cat:rule.cat, sub:rule.sub||'（未設定）',
       shop:rule.shop||'（未設定）', item:rule.item||'（品目なし）', taxRate:rule.taxRate,
       active: dt<=today, ruleId:rule.id, unit: rule.unit!=null?rule.unit:rule.amount, qty: rule.qty!=null?rule.qty:1});
@@ -904,7 +904,7 @@ function renderRec(){
       + '</div>'
       + '</div>';
   });
-  html += REC.editId ? '' : '<button class="additem" id="additem">＋ 品目を追加</button>';
+  html += (REC.editId || REC.repeat) ? '' : '<button class="additem" id="additem">＋ 品目を追加</button>';
 
   // 繰り返し（新規・単発のときだけ。編集/複製では出さない）
   if(!REC.editId && !REC.editFrom){
@@ -912,7 +912,7 @@ function renderRec(){
       + '<label class="repeattoggle"><span class="rt-txt">毎月くり返す</span>'
       +   '<span class="switch'+(REC.repeat?' on':'')+'" id="repToggle"><span class="knob"></span></span></label>';
     if(REC.repeat){
-      html += '<div class="rep-note">この内容を毎月 '+parseInt(REC.date.slice(8),10)+'日 に記録します（未来分は「予定」として先に作成）。</div>'
+      html += '<div class="rep-note">この内容を毎月 '+parseInt(REC.date.slice(8),10)+'日 に記録します（未来分は「予定」として先に作成）。くり返しは1品目です。</div>'
         + '<div class="rep-ends">'
         + '<button class="rep-end'+(REC.endKind==='forever'?' on':'')+'" data-end="forever">ずっと</button>'
         + '<button class="rep-end'+(REC.endKind==='count'?' on':'')+'" data-end="count">回数で終了</button>'
@@ -981,7 +981,11 @@ function renderRec(){
   });
   el.querySelectorAll('.ir-del').forEach(b=> b.onclick=()=>{ REC.items.splice(+b.dataset.idx,1); renderRec(); });
   const add=document.getElementById('additem'); if(add) add.onclick=()=>{ REC.items.push(newItem()); renderRec(); };
-  const rep=document.getElementById('repToggle'); if(rep) rep.onclick=()=>{ REC.repeat=!REC.repeat; renderRec(); };
+  const rep=document.getElementById('repToggle'); if(rep) rep.onclick=()=>{
+    REC.repeat=!REC.repeat;
+    if(REC.repeat && REC.items.length>1){ REC.items=[REC.items.find(x=>lineTotal(x)>0)||REC.items[0]]; }  // 繰り返しは1品目
+    renderRec();
+  };
   el.querySelectorAll('[data-end]').forEach(b=> b.onclick=()=>{ REC.endKind=b.dataset.end; renderRec(); });
   const ec=document.getElementById('endCount'); if(ec) ec.oninput=e=>{ REC.endCount=e.target.value.replace(/[^0-9]/g,''); };
   const ey=document.getElementById('endYm'); if(ey) ey.onchange=e=>{ REC.endYm=e.target.value; };
@@ -1045,7 +1049,7 @@ function saveRec(){
     if(REC.ruleScope && REC.ruleScope.ruleId){
       const rid = REC.ruleScope.ruleId, fromDate = REC.ruleScope.fromDate;
       const patch = {amount, cat:REC.cat, sub:REC.sub||'（未設定）', shop:REC.shop||'（未設定）',
-        item:it.name||'（品目なし）', taxRate:rate, unit, qty:q, _fromDate:fromDate};
+        item:it.name||'（品目なし）', taxRate:rate, unit, qty:q, _fromDate:fromDate, _newDate:d};
       period = d.slice(0,7);
       REC = {date:defaultRecDate(), taxMode:'in', cat:'', sub:'', shop:'', items:[newItem()], repeat:false, endKind:'forever', endCount:'', endYm:''};
       updateRuleContent(rid, patch).then(()=>showToast('これ以降の繰り返しを更新しました'));
@@ -1500,20 +1504,40 @@ function createRule(rule){
     .catch(e=>{ console.error(e); setSync('err'); });
 }
 
-/* ルール内容を更新（これ以降すべて）。未活性の予定分に新内容を反映 */
+/* ルール内容を更新（これ以降すべて）。未活性の予定分に新内容を反映。_newDateがあれば「毎月◯日」も変更 */
 function updateRuleContent(ruleId, patch){
   const rule = RULES.find(r=>r.id===ruleId); if(!rule) return Promise.resolve();
-  Object.assign(rule, patch);                       // ローカル反映（unit/qtyも含む）
-  // まだ活性化していない予定分を新内容へ更新
   const fromDate = patch._fromDate || jstToday();
+  const newDate = patch._newDate;
+  // 内容フィールドだけ rule に反映（_始まりの制御用は除く）
+  ['amount','cat','sub','shop','item','taxRate','unit','qty'].forEach(k=>{ if(patch[k]!==undefined) rule[k]=patch[k]; });
+
+  // 日付（毎月◯日）変更：起点日を更新し、fromDate以降の予定を作り直す
+  let delIds = [];
+  if(newDate){
+    rule.startDate = newDate;
+    const doomed = TX.filter(t=>t.ruleId===ruleId && t.active===false && t.date>=fromDate);
+    delIds = doomed.map(t=>t.id);
+    TX = TX.filter(t=>!(t.ruleId===ruleId && t.active===false && t.date>=fromDate));
+  }
+  // 残っている予定分（fromDate以降）に新内容を反映
   const targets = TX.filter(t=>t.ruleId===ruleId && t.active===false && t.date>=fromDate);
   targets.forEach(t=>{ t.amount=rule.amount; t.cat=rule.cat; t.sub=rule.sub; t.shop=rule.shop; t.item=rule.item; t.taxRate=rule.taxRate; t.unit=rule.unit; t.qty=rule.qty; });
-  if(!sb||!SESSION) return Promise.resolve();
+  // 日付変更なら新しい◯日で作り直し（年月重複はスキップされる）
+  const newRows = newDate ? buildRuleTx(rule) : [];
+
+  if(!sb||!SESSION){ return newRows.length ? insertTx(newRows) : Promise.resolve(); }
   setSync('save');
-  const p1 = sb.from('kakeibo_rule').update({amount:rule.amount, cat:rule.cat, sub:rule.sub, shop:rule.shop, item:rule.item, tax_rate:rule.taxRate, unit_price:rule.unit, qty:rule.qty}).eq('id',ruleId).eq('user_id',SESSION.user.id);
+  const ops=[];
+  ops.push(sb.from('kakeibo_rule').update({amount:rule.amount, cat:rule.cat, sub:rule.sub, shop:rule.shop, item:rule.item,
+    tax_rate:rule.taxRate, unit_price:rule.unit, qty:rule.qty, start_date:rule.startDate}).eq('id',ruleId).eq('user_id',SESSION.user.id));
   const ids = targets.map(t=>t.id);
-  const p2 = ids.length ? sb.from('kakeibo_tx').update({amount:rule.amount, cat:rule.cat, sub:rule.sub, shop:rule.shop, item:rule.item, tax_rate:rule.taxRate, unit_price:rule.unit, qty:rule.qty}).in('id',ids).eq('user_id',SESSION.user.id) : Promise.resolve({});
-  return Promise.all([p1,p2]).then(rs=>{ if(rs.some(x=>x&&x.error)) setSync('err'); else setSync('ok'); })
+  if(ids.length) ops.push(sb.from('kakeibo_tx').update({amount:rule.amount, cat:rule.cat, sub:rule.sub, shop:rule.shop, item:rule.item,
+    tax_rate:rule.taxRate, unit_price:rule.unit, qty:rule.qty}).in('id',ids).eq('user_id',SESSION.user.id));
+  if(delIds.length) ops.push(sb.from('kakeibo_tx').delete().in('id',delIds).eq('user_id',SESSION.user.id));
+  return Promise.all(ops).then(rs=>{ if(rs.some(x=>x&&x.error)) throw (rs.find(x=>x&&x.error).error);
+      return newRows.length ? insertTx(newRows) : null; })
+    .then(()=>setSync('ok'))
     .catch(e=>{ console.error(e); setSync('err'); });
 }
 
